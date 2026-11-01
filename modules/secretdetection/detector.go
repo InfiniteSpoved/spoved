@@ -5,6 +5,7 @@ package secretdetection
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"slices"
 	"sort"
@@ -420,7 +421,7 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 		}
 		pos = f.start
 		findings[i] = Finding{
-			RuleID:      f.rule.ID,
+			RuleID:      cmp.Or(f.rule.ReportAs, f.rule.ID),
 			StartLine:   line,
 			EndLine:     line + bytes.Count(content[f.start:f.end-1], []byte("\n")),
 			StartCol:    f.start - lineStart + 1,
@@ -618,7 +619,7 @@ func (r *compiledRule) ranges(lower []byte, allow int) (out [][2]int, spent int,
 // accepts checks the secret itself, never the text around it: context such as
 // XML tags or a template next to a real key must not drop it.
 func (r *compiledRule) accepts(secret []byte) bool {
-	if r.MinEntropy > 0 && (entropy(secret) < r.MinEntropy || ascending(secret, 10)) {
+	if r.MinEntropy > 0 && (entropy(secret) < r.MinEntropy || r.Type != "generic" && ascending(secret, 10)) {
 		return false
 	}
 	for _, a := range r.allowlist {
@@ -630,10 +631,13 @@ func (r *compiledRule) accepts(secret []byte) bool {
 }
 
 // ascending: b has a run of n bytes that each follow the one before
-// (0123456789, abcdefghij), a placeholder however high its entropy.
+// (0123456789, abcdefghij), a placeholder however high its entropy. People
+// choose such runs in passwords, so the generic rules don't use it.
 func ascending(b []byte, n int) bool {
 	for i, k := 1, 1; i < len(b); i++ {
-		if k++; b[i] != b[i-1]+1 {
+		if b[i] == b[i-1]+1 {
+			k++
+		} else {
 			k = 1
 		}
 		if k >= n {

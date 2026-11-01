@@ -448,6 +448,7 @@ func TestSecretAlertsRescanAndSettings(t *testing.T) {
 			require.NoError(t, err)
 			for _, sc := range scans {
 				assert.Zero(t, sc.Holes)
+				assert.Zero(t, sc.SkippedLarge)
 				assert.NotEqual(t, `["abc"]`, sc.ScannedTips)
 				assert.NotEqual(t, "over_limit", sc.Error)
 			}

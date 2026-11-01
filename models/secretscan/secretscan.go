@@ -80,7 +80,7 @@ type Scan struct {
 	Error       string `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"` // a code, never text from git
 	// Blobs and Bytes count the last scan: the files read and their size. SkippedLarge counts the files over
 	// MAX_BLOB_SIZE that were not read since the scan started from the beginning (a rescan resets it), so a later push
-	// doesn't make them look read
+	// doesn't make them look read. It is an upper bound: a file reached again (a merged pull ref, a revert) counts again
 	Blobs        int64 `xorm:"NOT NULL DEFAULT 0"`
 	Bytes        int64 `xorm:"NOT NULL DEFAULT 0"`
 	SkippedLarge int64 `xorm:"NOT NULL DEFAULT 0"`

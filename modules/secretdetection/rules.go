@@ -140,11 +140,13 @@ var builtinRules = []Rule{
 	},
 	{
 		// The legacy form is 40 hex characters, as an OAuth app's client
-		// secret: it counts after a github...token/secret/key name, before
-		// the Forgejo rules, which would claim the same hex after "token".
+		// secret: it counts after a github name that ends in a secret, pat,
+		// key or password word (github_secret, GITHUB_CLIENT_SECRET). A bare
+		// GITHUB_TOKEN is left to the Forgejo rules: Actions on spoved set
+		// it to spoved's own job token.
 		ID: "github-legacy-token", Name: "GitHub token or client secret (40 hex characters)", Type: "github",
 		Keywords:    []string{"github"},
-		Regex:       `(?i:github)[\w.-]{0,20}(?i:token|secret|pat|key|password)[\w.-]{0,10}(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?([0-9a-f]{40})`,
+		Regex:       `(?i:github)(?:[\w.-]{0,20}[_.-])?(?i:secret|pat|key|password)(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?([0-9a-f]{40})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars, Window: 512, Anchored: true, HitCheck: githubHit,
 	},
 	{
@@ -244,21 +246,22 @@ var builtinRules = []Rule{
 	},
 	{
 		// Three base64url parts; header and payload start with eyJ (`{"`). The
-		// signature may be empty (alg none, which still counts), else it is at
-		// least 43 characters (HS256, the shortest): a word there ("signature")
-		// is a documentation sample. The token of jwt.io's documentation is no
-		// secret.
+		// signature may be empty (alg none, which still counts); a short one
+		// of letters only ("signature") is a documentation sample. The token
+		// of jwt.io's documentation is no secret. RS256 tokens with claims
+		// are often over 1 KiB.
 		ID: "jwt", Name: "JSON Web Token", Type: "jwt",
 		Keywords:    []string{"eyj"},
 		Regex:       `(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`,
-		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars, MaxSecretLen: 8 << 10,
 		Check:     jwtCheck,
 		Allowlist: []string{jwtIOSignature},
 	},
 	{
-		// A JWT in base64 (a Kubernetes secret, an env file): the secret is
-		// the decoded JWT, so it has the fingerprint of the JWT itself.
-		ID: "jwt-base64", Name: "JSON Web Token in base64", Type: "jwt",
+		// A JWT in base64 on one line (a Kubernetes secret, base64 -w0; GNU
+		// base64's wrapped output is not decoded): the secret is the decoded
+		// JWT and its findings are the jwt rule's, so both forms are one alert.
+		ID: "jwt-base64", Name: "JSON Web Token in base64", Type: "jwt", ReportAs: "jwt",
 		Keywords:    []string{"zxlk"},
 		Regex:       `(ZXlK[A-Za-z0-9+/]{40,}={0,2})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "+/", MaxSecretLen: 8 << 10,
@@ -566,9 +569,12 @@ func decodeBase64JWT(secret []byte) []byte {
 }
 
 // jwtCheck: the first part of a JWT is a JSON object with "alg", and the
-// signature is empty or at least 43 characters (32 bytes).
+// signature is not a word: a signature shorter than 43 characters (32 bytes,
+// HS256) of letters only. A cut real one (a line break in it) still counts.
 func jwtCheck(secret []byte) bool {
-	if sig := secret[bytes.LastIndexByte(secret, '.')+1:]; len(sig) > 0 && len(sig) < 43 {
+	if sig := secret[bytes.LastIndexByte(secret, '.')+1:]; len(sig) > 0 && len(sig) < 43 && !bytes.ContainsFunc(sig, func(r rune) bool {
+		return r < 'A' || r > 'Z' && r < 'a' || r > 'z'
+	}) {
 		return false
 	}
 	head, _, _ := strings.Cut(string(secret), ".")

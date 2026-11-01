@@ -47,14 +47,18 @@ func comparisonRuleTests() []ruleTest {
 		},
 		{
 			"github-legacy-token",
-			[]string{`"github_secret": "` + hex40 + `"`, "GITHUB_TOKEN=" + hex40, "github.oauth.client_secret: " + hex40},
-			[]string{"GITHUB_SHA=" + hex40, "github.sha: " + hex40, "github_token = " + fake(39, hexa), "token = " + hex40},
+			[]string{`"github_secret": "` + hex40 + `"`, "GITHUB_CLIENT_SECRET=" + hex40, "github.oauth.client_secret: " + hex40, "GITHUB_PAT=" + hex40},
+			[]string{
+				"GITHUB_SHA=" + hex40, "github.sha: " + hex40, "github_secret = " + fake(39, hexa), "token = " + hex40,
+				"GITHUB_TOKEN=" + hex40, // left to the Forgejo rules
+				"github_key_sha1: " + hex40, "github_monkey: " + hex40,
+			},
 		},
 		{
 			"jwt-base64",
 			[]string{
 				"token: " + base64.StdEncoding.EncodeToString([]byte(jwt)),
-				base64.StdEncoding.EncodeToString([]byte(jwt + "\n")), // echo $TOKEN | base64
+				base64.StdEncoding.EncodeToString([]byte(jwt + "\n")), // echo $TOKEN | base64 -w0 (wrapped base64 is not decoded)
 			},
 			[]string{
 				base64.StdEncoding.EncodeToString([]byte(b64url(`{"typ":"JWT"}`) + "." + b64url(`{"sub":"42","name":"Jane Roe"}`) + "." + fake(43, b64u))), // no alg
@@ -83,24 +87,41 @@ func TestSlackTokenIsMatchedWhole(t *testing.T) {
 	assert.NotEqual(t, a[0].Fingerprint, b[0].Fingerprint)
 }
 
-// A legacy GitHub token after a github name is a GitHub token, also when the name says token.
-func TestGitHubLegacyTokenWinsOverForgejo(t *testing.T) {
+// 40 hex after github_secret is a GitHub secret; after GITHUB_TOKEN it stays a Forgejo token (Actions on spoved set
+// GITHUB_TOKEN to spoved's own job token).
+func TestGitHubLegacyTokenAndForgejo(t *testing.T) {
 	d := allRulesDetector(t)
-	fs := scanOf(d, []byte("GITHUB_TOKEN="+fake(40, hexa)+"\n"))
-	require.Len(t, fs, 1)
-	assert.Equal(t, "github-legacy-token", fs[0].RuleID)
-	assert.Equal(t, 1, countRule(d, "FORGEJO_TOKEN="+fake(40, hexa), "forgejo-access-token"))
+	for content, rule := range map[string]string{
+		`"github_secret": "` + fake(40, hexa) + `"`: "github-legacy-token",
+		"GITHUB_TOKEN=" + fake(40, hexa):            "forgejo-access-token",
+		"FORGEJO_TOKEN=" + fake(40, hexa):           "forgejo-access-token",
+	} {
+		fs := scanOf(d, []byte(content+"\n"))
+		require.Len(t, fs, 1, content)
+		assert.Equal(t, rule, fs[0].RuleID, content)
+	}
 }
 
-// A JWT in base64 has the fingerprint of the JWT.
+// A JWT in base64 is a finding of the jwt rule with the fingerprint of the JWT: one alert for both forms.
 func TestBase64JWTHasTheJWTFingerprint(t *testing.T) {
 	d := allRulesDetector(t)
 	jwt := b64url(`{"alg":"RS256"}`) + "." + b64url(`{"sub":"42","name":"Jane Roe"}`) + "." + fake(86, b64u)
 	plain, wrapped := scanOf(d, []byte(jwt)), scanOf(d, []byte("data:\n  token: "+base64.StdEncoding.EncodeToString([]byte(jwt))+"\n"))
 	require.Len(t, plain, 1)
 	require.Len(t, wrapped, 1)
-	assert.Equal(t, "jwt-base64", wrapped[0].RuleID)
+	assert.Equal(t, "jwt", wrapped[0].RuleID)
 	assert.Equal(t, plain[0].Fingerprint, wrapped[0].Fingerprint)
+}
+
+// A JWT of a few KiB (RS256 with claims, a Kubernetes service account token) is found.
+func TestLongJWTIsFound(t *testing.T) {
+	d := allRulesDetector(t)
+	claims := `{"sub":"system:serviceaccount:ns:sa","groups":["` + strings.Repeat(fake(40, alnum)+`","`, 30) + `x"]}`
+	jwt := b64url(`{"alg":"RS256","kid":"k1"}`) + "." + b64url(claims) + "." + fake(342, b64u)
+	require.Greater(t, len(jwt), 1500)
+	fs := scanOf(d, []byte("token: "+jwt+"\n"))
+	require.Len(t, fs, 1)
+	assert.Equal(t, len(jwt), fs[0].End-fs[0].Start)
 }
 
 // Documentation samples: a JWT signed with a word, and a token made of an ascending sequence.
@@ -108,8 +129,13 @@ func TestSamplePlaceholdersAreNoSecrets(t *testing.T) {
 	d := allRulesDetector(t)
 	doc := b64url(`{"alg":"HS256","typ":"JWT"}`) + "." + b64url(`{"sub":"1234567890","name":"Jane Roe","iat":1516239022}`) + ".signature"
 	assert.Empty(t, scanOf(d, []byte("Example header.payload: `"+doc+"`\n")))
+	signed := doc[:len(doc)-len("signature")]
+	assert.Len(t, scanOf(d, []byte(signed+fake(43, b64u))), 1, "a real signature")
+	assert.Len(t, scanOf(d, []byte(signed+fake(20, b64u)+"\\\n"+fake(23, b64u))), 1, "a signature cut by a line break")
+	assert.Empty(t, scanOf(d, []byte(signed+"abc")), "a short word")
 	assert.Empty(t, scanOf(d, []byte("GITHUB_TOKEN=ghp_"+"0123456789"+"abcdefghijklmnopqrstuvwxyz\n")))
 	assert.Empty(t, scanOf(d, []byte("token: ghp_"+fake(20, alnum)+"klmnopqrstuvwxyz\n")), "a run inside")
 	assert.Len(t, scanOf(d, []byte("token: ghp_"+fake(36, alnum)+"\n")), 1)
 	assert.Len(t, scanOf(d, []byte("xoxb-1234567890-123456789012-"+fake(24, alnum)+"\n")), 1, "nine ascending digits are an ID")
+	assert.Equal(t, 1, countRule(d, `db_password = "Acme0123456789!Prod#Xq"`, "generic-secret-assignment"), "a chosen password with a run is no placeholder")
 }

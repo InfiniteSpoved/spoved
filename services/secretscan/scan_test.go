@@ -1098,6 +1098,16 @@ func TestScanPullRefsAreTheirOwnScan(t *testing.T) {
 	assert.True(t, alertFor(t, repo.ID, pull).ViaPull)
 	assert.False(t, alertFor(t, repo.ID, def).ViaPull)
 	assert.Equal(t, secretscan_model.KindPull, locationsOf(t, alertFor(t, repo.ID, pull).ID)[0].Kind, "the place says a pull ref reaches it")
+
+	// merged: a branch reaches the place too, and it is listed once per kind
+	w.git("checkout", "-q", "pr")
+	w.push("refs/heads/pr")
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	locs := locationsOf(t, alertFor(t, repo.ID, pull).ID)
+	require.Len(t, locs, 2)
+	assert.ElementsMatch(t, []string{secretscan_model.KindPull, secretscan_model.KindRepo}, []string{locs[0].Kind, locs[1].Kind})
+	assert.Equal(t, locs[0].Path, locs[1].Path)
+	assert.False(t, alertFor(t, repo.ID, pull).ViaPull)
 }
 
 func TestScanContinuesWithinATip(t *testing.T) {

@@ -67,6 +67,9 @@ func allRulesDetector(t testing.TB) *Detector {
 }
 
 func countRule(d *Detector, content, id string) int {
+	if r, ok := RuleByID(id); ok && r.ReportAs != "" {
+		id = r.ReportAs
+	}
 	n := 0
 	for _, f := range scanOf(d, []byte(content)) {
 		if f.RuleID == id || strings.HasPrefix(f.RuleID, id+"-") {
