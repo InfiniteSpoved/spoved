@@ -21,35 +21,45 @@ test.describe('the owner of a repository', () => {
     const n = alertOf[testInfo.project.name];
     await page.goto(`/user11/secret-redact-test/security/secrets/${n}`);
     const places = page.locator('.secret-locations');
-    const redact = places.locator('button.secret-redact');
-    await expect(redact).toHaveCount(2);
+    await expect(places.locator('button.secret-redact')).toHaveCount(2);
+    const body = places.getByRole('button', {name: `Redact the secret from Issue #${n} · description`, exact: true});
+    const comment = places.getByRole('button', {name: `Redact the secret from Issue #${n} · comment`, exact: true});
+    await expect(body).toHaveText('Redact…');
 
     // the dialog says what happens, and Cancel leaves everything as it is
     const dialog = page.locator('#secret-redact-modal');
-    await redact.first().click();
+    await body.click();
     await expect(dialog).toBeVisible();
+    await expect(dialog.locator('header')).toHaveText('Redact the secret');
     await expect(dialog.locator('#secret-redact-where')).toHaveText(`Issue #${n} · description`);
     await expect(dialog).toContainText('[secret removed]');
     await expect(dialog).toContainText('edit history');
     await expect(dialog).toContainText("can't be undone");
-    await expect(dialog).toContainText('revoke it as well');
+    await expect(dialog).toContainText('The credential still works until you revoke it');
+    await expect(dialog).toContainText('webhook deliveries');
     await screenshot(page);
     await dialog.getByRole('button', {name: 'Cancel', exact: true}).click();
     await expect(dialog).toBeHidden();
 
-    // confirmed: the text is redacted, the place is marked and its button is gone
-    await redact.first().click();
-    await dialog.getByRole('button', {name: 'Remove the secret', exact: true}).click();
-    await expect(page.locator('.flash-success')).toContainText('The secret was removed from the text');
-    await expect(places.locator('button.secret-redact')).toHaveCount(1);
+    // confirmed: the text is redacted and the place is marked; the button stays, for the history
+    await body.click();
+    await dialog.getByRole('button', {name: 'Redact', exact: true}).click();
+    await expect(page.locator('.flash-success')).toContainText('Revoke it, then close the alert.');
     await expect(places).toContainText('Removed from the text');
-    await expect(page.locator('#secret-activity')).toContainText('removed the secret from the text');
+    await expect(page.locator('#secret-activity')).toContainText('removed the secret from an issue or pull request text');
     await screenshot(page);
 
-    // the comment's text no longer holds the secret: refused, nothing changes
-    await places.locator('button.secret-redact').click();
-    await dialog.getByRole('button', {name: 'Remove the secret', exact: true}).click();
-    await expect(page.locator('.flash-error')).toContainText('The secret is no longer in this text');
+    // the comment no longer holds the secret, its edit history does: that is erased
+    await comment.click();
+    await expect(dialog.locator('#secret-redact-where')).toHaveText(`Issue #${n} · comment`);
+    await dialog.getByRole('button', {name: 'Redact', exact: true}).click();
+    await expect(page.locator('.flash-success')).toContainText('The secret was already gone from the text. Its earlier versions were deleted from the edit history.');
+    await screenshot(page);
+
+    // then nothing is left to remove
+    await comment.click();
+    await dialog.getByRole('button', {name: 'Redact', exact: true}).click();
+    await expect(page.locator('.flash-info')).toContainText('Nothing left to remove');
     await screenshot(page);
 
     await page.goto(`/user11/secret-redact-test/issues/${n}`);

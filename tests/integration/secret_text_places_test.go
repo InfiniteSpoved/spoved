@@ -258,7 +258,7 @@ func TestSecretTextPlacesRealAccess(t *testing.T) {
 	codePlace.AlertID = both.ID
 	require.NoError(t, db.Insert(ctx, codePlace))
 	body := NewHTMLParser(t, loginUser(t, "user2").MakeRequest(t, NewRequest(t, "GET", fmt.Sprintf("/org3/sl-root/security/secrets/%d", both.Index)), http.StatusOK).Body).Find("#secret-guidance").Text()
-	assert.Contains(t, body, "it stays in git history, in the text's edit history and in notification mails")
+	assert.Contains(t, body, "it stays in git history and in notification mails, and in the text's edit history until you redact it")
 
 	text = page("user2", gone)
 	assert.Contains(t, text, "The issue or pull request was deleted")

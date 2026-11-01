@@ -371,10 +371,12 @@ func RedactSecretScanningText(ctx *context.APIContext) {
 	// summary: Remove the secret of an alert from the text of an issue, pull request or comment
 	// description: For people who may resolve the alert and read the issue or pull request (a token with scopes also
 	//   needs write:issue). The secret is found again in the text as it is now and every copy of it is replaced with
-	//   "[secret removed]"; the earlier versions in the text's edit history are emptied, the alert's places in the text
-	//   are marked removed and the change is audited. Nobody is notified. It can't be undone, and the secret must still
-	//   be revoked. A text the alert has no place in, or that the caller can't read, is 404; a text that no longer holds
-	//   the secret is 422, one that changed while it was redacted 409.
+	//   "[secret removed]"; the versions in the text's edit history are emptied (for a title, the secret is removed from
+	//   the title changes of the timeline), the alert's places in the text are marked removed and the change is
+	//   audited. When the secret is already gone from the text, only the rest is done (204 too). Nobody is notified. It
+	//   can't be undone, and the secret must still be revoked. A text the alert has no place in, or that the caller
+	//   can't read, is 404; a text the detector can't read whole, an alert whose pattern is no longer used and a text
+	//   with nothing left to remove are 422, a text that changed while it was redacted 409.
 	// consumes:
 	// - application/json
 	// produces:
@@ -429,7 +431,7 @@ func RedactSecretScanningText(ctx *context.APIContext) {
 	perm := ctx.Permission()
 	target := secretscan_service.RedactTarget{Issue: form.IssueNumber, Field: form.Field, Comment: form.CommentID}
 	access := secretscan_model.TextAccess{Issues: perm.CanRead(unit.TypeIssues), Pulls: perm.CanRead(unit.TypePullRequests)}
-	switch err := secretscan_service.RedactText(ctx, ctx.Repo().Repository, ctx.Doer(), alert.Index, target, access, perm.CanRead(unit.TypeWiki)); {
+	switch _, err := secretscan_service.RedactText(ctx, ctx.Repo().Repository, ctx.Doer(), alert.Index, target, access, perm.CanRead(unit.TypeWiki)); {
 	case err == nil:
 		ctx.Status(http.StatusNoContent)
 	case errors.Is(err, util.ErrInvalidArgument):

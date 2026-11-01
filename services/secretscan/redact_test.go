@@ -88,7 +88,26 @@ func newRedactFixture(t *testing.T) *redactFixture {
 
 func (f *redactFixture) redact(t *testing.T, target RedactTarget, access secretscan_model.TextAccess) error {
 	t.Helper()
+	_, err := f.redactCount(t, target, access)
+	return err
+}
+
+func (f *redactFixture) redactCount(t *testing.T, target RedactTarget, access secretscan_model.TextAccess) (int, error) {
+	t.Helper()
 	return RedactText(audit_model.WithSystem(t.Context(), "test"), f.repo, f.doer, f.alert.Index, target, access, true)
+}
+
+func auditData(t *testing.T) []map[string]any {
+	t.Helper()
+	var entries []*audit_model.Entry
+	require.NoError(t, db.GetEngine(t.Context()).Where("action = ?", "repo.secret_alert.text_redacted").OrderBy("id").Find(&entries))
+	var out []map[string]any
+	for _, e := range entries {
+		var data map[string]any
+		require.NoError(t, json.Unmarshal([]byte(e.Data), &data))
+		out = append(out, data)
+	}
+	return out
 }
 
 func placesOf(t *testing.T, alertID int64, kind, field string) []*secretscan_model.Location {
@@ -151,8 +170,10 @@ func TestRedactBody(t *testing.T) {
 	assert.NotContains(t, e.Data, f.tok[4:])
 	assert.NotContains(t, e.Data, "first")
 
-	t.Run("again: the secret is gone", func(t *testing.T) {
+	assert.Nil(t, data["history_only"])
+	t.Run("again: nothing is left", func(t *testing.T) {
 		require.ErrorIs(t, f.redact(t, RedactTarget{Issue: f.issue.Index, Field: "body"}, readBoth), ErrRedactGone)
+		assert.Len(t, auditData(t), 1, "nothing recorded")
 	})
 	t.Run("the history shows the redaction, without the text", func(t *testing.T) {
 		events, err := AlertHistory(t.Context(), f.repo.ID, f.alert.ID)
@@ -167,9 +188,12 @@ func TestRedactTitle(t *testing.T) {
 	change := &issues_model.Comment{Type: issues_model.CommentTypeChangeTitle, IssueID: f.issue.ID, PosterID: 2, OldTitle: "draft " + f.tok, NewTitle: f.issue.Title}
 	require.NoError(t, db.Insert(t.Context(), change))
 	feed := &activities_model.Action{OpType: activities_model.ActionCreateIssue, RepoID: f.repo.ID, ActUserID: 2, Content: fmt.Sprintf(`["%d","%s"]`, f.issue.Index, f.issue.Title)}
+	watcher := &activities_model.Action{OpType: activities_model.ActionCreateIssue, RepoID: f.repo.ID, UserID: 5, ActUserID: 2, Content: feed.Content} // one row per watcher
 	elsewhere := &activities_model.Action{OpType: activities_model.ActionCreateIssue, RepoID: f.repo.ID, ActUserID: 2, Content: fmt.Sprintf(`["%d","%s"]`, f.issue.Index+1, f.issue.Title)}
-	require.NoError(t, db.Insert(t.Context(), feed))
-	require.NoError(t, db.Insert(t.Context(), elsewhere))
+	commented := &activities_model.Action{OpType: activities_model.ActionCommentIssue, RepoID: f.repo.ID, ActUserID: 3, CommentID: f.comment.ID, Content: fmt.Sprintf(`["%d","%s"]`, f.issue.Index, f.comment.Content)}
+	for _, a := range []*activities_model.Action{feed, watcher, elsewhere, commented} {
+		require.NoError(t, db.Insert(t.Context(), a))
+	}
 
 	require.NoError(t, f.redact(t, RedactTarget{Issue: f.issue.Index, Field: "title"}, readBoth))
 
@@ -180,13 +204,29 @@ func TestRedactTitle(t *testing.T) {
 	assert.Equal(t, "draft "+RedactedMark, change.OldTitle)
 	assert.Equal(t, "leaked "+RedactedMark, change.NewTitle)
 	assert.Equal(t, fmt.Sprintf(`["%d","leaked %s"]`, f.issue.Index, RedactedMark), unittest.AssertExistsAndLoadBean(t, &activities_model.Action{ID: feed.ID}).Content)
+	assert.Equal(t, fmt.Sprintf(`["%d","leaked %s"]`, f.issue.Index, RedactedMark), unittest.AssertExistsAndLoadBean(t, &activities_model.Action{ID: watcher.ID}).Content)
 	assert.Contains(t, unittest.AssertExistsAndLoadBean(t, &activities_model.Action{ID: elsewhere.ID}).Content, f.tok, "another issue's feed entry is left alone")
+	assert.Contains(t, unittest.AssertExistsAndLoadBean(t, &activities_model.Action{ID: commented.ID}).Content, f.tok, "a comment's feed entry is the comment's text")
 	for _, l := range placesOf(t, f.alert.ID, secretscan_model.KindIssue, "title") {
 		assert.NotZero(t, l.RemovedUnix)
 	}
 	for _, l := range placesOf(t, f.alert.ID, secretscan_model.KindIssue, "body") {
 		assert.Zero(t, l.RemovedUnix)
 	}
+
+	t.Run("already gone from the title: the title changes are still redacted", func(t *testing.T) {
+		later := &issues_model.Comment{Type: issues_model.CommentTypeChangeTitle, IssueID: f.issue.ID, PosterID: 2, OldTitle: "v2 " + f.tok, NewTitle: "leaked " + RedactedMark}
+		require.NoError(t, db.Insert(t.Context(), later)) // as if a copy were left
+		n, err := f.redactCount(t, RedactTarget{Issue: f.issue.Index, Field: "title"}, readBoth)
+		require.NoError(t, err)
+		assert.Zero(t, n)
+		assert.Equal(t, "v2 "+RedactedMark, unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: later.ID}).OldTitle)
+		data := auditData(t)
+		require.Len(t, data, 2)
+		assert.Equal(t, true, data[1]["history_only"])
+		assert.EqualValues(t, 0, data[1]["replaced"])
+		require.ErrorIs(t, f.redact(t, RedactTarget{Issue: f.issue.Index, Field: "title"}, readBoth), ErrRedactGone, "then nothing is left")
+	})
 }
 
 func TestRedactComment(t *testing.T) {
@@ -239,13 +279,14 @@ func TestRedactRefusals(t *testing.T) {
 		require.ErrorIs(t, f.redact(t, RedactTarget{Issue: plain.Index, Field: "body"}, readBoth), util.ErrNotExist)
 	})
 	t.Run("an alert the doer can't see", func(t *testing.T) {
-		err := RedactText(t.Context(), f.repo, f.doer, 99999, body, readBoth, true)
+		_, err := RedactText(t.Context(), f.repo, f.doer, 99999, body, readBoth, true)
 		require.ErrorIs(t, err, util.ErrNotExist)
 	})
 	t.Run("archived", func(t *testing.T) {
 		archived := *f.repo
 		archived.IsArchived = true
-		require.ErrorIs(t, RedactText(t.Context(), &archived, f.doer, f.alert.Index, body, readBoth, true), ErrArchived)
+		_, err := RedactText(t.Context(), &archived, f.doer, f.alert.Index, body, readBoth, true)
+		require.ErrorIs(t, err, ErrArchived)
 		unchanged(t)
 	})
 	t.Run("an edit while it reads the text", func(t *testing.T) {
@@ -271,13 +312,129 @@ func TestRedactRefusals(t *testing.T) {
 			assert.Zero(t, l.RemovedUnix)
 		}
 	})
-	t.Run("the text changed since: the secret is gone", func(t *testing.T) {
-		setText(t, "comment", f.comment.ID, "content", "edited out")
-		require.ErrorIs(t, f.redact(t, RedactTarget{Comment: f.comment.ID}, readBoth), ErrRedactGone)
-	})
 	t.Run("a text too long to read whole", func(t *testing.T) {
 		long := strings.Repeat("x", 5000) + f.tok // past the size the detector reads: not found, as by the scan
 		setText(t, "comment", f.comment.ID, "content", long)
 		require.ErrorIs(t, f.redact(t, RedactTarget{Comment: f.comment.ID}, readBoth), ErrRedactManual)
 	})
+}
+
+func TestRedactReview(t *testing.T) {
+	f := newRedactFixture(t)
+	review := &issues_model.Review{Type: issues_model.ReviewTypeComment, ReviewerID: 2, IssueID: f.issue.ID, Content: "review: " + f.tok}
+	require.NoError(t, db.Insert(t.Context(), review))
+	c := &issues_model.Comment{Type: issues_model.CommentTypeReview, IssueID: f.issue.ID, PosterID: 2, ReviewID: review.ID, Content: review.Content}
+	require.NoError(t, db.Insert(t.Context(), c))
+	require.NoError(t, handleText(t.Context(), fmt.Sprintf("c:%d:0", c.ID)))
+
+	require.NoError(t, f.redact(t, RedactTarget{Comment: c.ID}, readBoth))
+	assert.Equal(t, "review: "+RedactedMark, unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: c.ID}).Content)
+	assert.Equal(t, "review: "+RedactedMark, unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: review.ID}).Content, "the review's own copy of its body")
+}
+
+func TestRedactGone(t *testing.T) {
+	f := newRedactFixture(t)
+	target := RedactTarget{Comment: f.comment.ID}
+	// the poster edited the secret out: the text no longer holds it, its edit history does (and the place is open
+	// until the next scan)
+	require.NoError(t, issues_model.SaveIssueContentHistory(t.Context(), 3, f.issue.ID, f.comment.ID, f.comment.CreatedUnix, f.comment.Content, true))
+	require.NoError(t, issues_model.SaveIssueContentHistory(t.Context(), 3, f.issue.ID, f.comment.ID, f.comment.CreatedUnix+1, "edited out", false))
+	setText(t, "comment", f.comment.ID, "content", "edited out")
+
+	n, err := f.redactCount(t, target, readBoth)
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	c := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: f.comment.ID})
+	assert.Equal(t, "edited out", c.Content, "the text is not written")
+	assert.Equal(t, f.comment.ContentVersion, c.ContentVersion)
+	var history []*issues_model.ContentHistory
+	require.NoError(t, db.GetEngine(t.Context()).Where("comment_id = ?", c.ID).OrderBy("id").Find(&history))
+	require.Len(t, history, 2, "no version is added")
+	for _, h := range history {
+		assert.True(t, h.IsDeleted)
+		assert.Empty(t, h.ContentText)
+	}
+	for _, l := range placesOf(t, f.alert.ID, secretscan_model.KindComment, "") {
+		assert.NotZero(t, l.RemovedUnix)
+	}
+	data := auditData(t)
+	require.Len(t, data, 1)
+	assert.Equal(t, true, data[0]["history_only"])
+	assert.EqualValues(t, 0, data[0]["replaced"])
+
+	t.Run("a place marked removed whose history still holds the secret", func(t *testing.T) {
+		require.NoError(t, issues_model.SaveIssueContentHistory(t.Context(), 3, f.issue.ID, f.comment.ID, f.comment.CreatedUnix+2, "again "+f.tok, false))
+		n, err := f.redactCount(t, target, readBoth)
+		require.NoError(t, err)
+		assert.Zero(t, n)
+		assert.Len(t, auditData(t), 2)
+	})
+	t.Run("then nothing is left", func(t *testing.T) {
+		require.ErrorIs(t, f.redact(t, target, readBoth), ErrRedactGone)
+		assert.Len(t, auditData(t), 2)
+	})
+}
+
+func TestRedactNothingWritten(t *testing.T) {
+	f := newRedactFixture(t)
+	body := RedactTarget{Issue: f.issue.Index, Field: "body"}
+	nothing := func(t *testing.T) {
+		t.Helper()
+		issue := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: f.issue.ID})
+		assert.Equal(t, f.issue.Content, issue.Content)
+		assert.Equal(t, f.comment.Content, unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: f.comment.ID}).Content)
+		has, err := issues_model.HasIssueContentHistory(t.Context(), f.issue.ID, 0)
+		require.NoError(t, err)
+		assert.False(t, has)
+		assert.Empty(t, auditData(t))
+		for _, l := range locationsOf(t, f.alert.ID) {
+			assert.Zero(t, l.RemovedUnix)
+		}
+	}
+
+	t.Run("a scan that found copies but did not read everything", func(t *testing.T) {
+		defer test.MockVariableValue(&scanContent, func(d *secretdetection.Detector, content []byte) ([]secretdetection.Finding, bool) {
+			findings, _ := d.Scan(content)
+			return findings, false // as when a rule reached its cap or the budget ran out
+		})()
+		require.ErrorIs(t, f.redact(t, body, readBoth), ErrRedactManual)
+		nothing(t)
+	})
+	t.Run("a text read as UTF-16", func(t *testing.T) {
+		setText(t, "comment", f.comment.ID, "content", "\xff\xfe"+f.comment.Content)
+		defer setText(t, "comment", f.comment.ID, "content", f.comment.Content)
+		require.ErrorIs(t, f.redact(t, RedactTarget{Comment: f.comment.ID}, readBoth), ErrRedactManual)
+	})
+	t.Run("a comment edited while it is read", func(t *testing.T) {
+		defer test.MockVariableValue(&scanContent, func(d *secretdetection.Detector, content []byte) ([]secretdetection.Finding, bool) {
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE comment SET content_version = content_version + 1 WHERE id = ?", f.comment.ID)
+			require.NoError(t, err)
+			return d.Scan(content)
+		})()
+		require.ErrorIs(t, f.redact(t, RedactTarget{Comment: f.comment.ID}, readBoth), ErrRedactChanged)
+		var history []*issues_model.ContentHistory
+		require.NoError(t, db.GetEngine(t.Context()).Where("comment_id = ?", f.comment.ID).Find(&history))
+		assert.Empty(t, history, "the history is not touched")
+		nothing(t)
+	})
+	t.Run("an alert whose pattern is no longer used", func(t *testing.T) {
+		_, err := db.GetEngine(t.Context()).Exec("UPDATE secret_scanning_alert SET rule_id = ? WHERE id = ?", "custom-999", f.alert.ID)
+		require.NoError(t, err)
+		defer func() {
+			_, err := db.GetEngine(t.Context()).Exec("UPDATE secret_scanning_alert SET rule_id = ? WHERE id = ?", f.alert.RuleID, f.alert.ID)
+			require.NoError(t, err)
+		}()
+		require.ErrorIs(t, f.redact(t, body, readBoth), ErrRedactPattern)
+		nothing(t)
+	})
+}
+
+func TestRedactPullText(t *testing.T) {
+	f := newRedactFixture(t)
+	_, err := db.GetEngine(t.Context()).Exec("UPDATE issue SET is_pull = ? WHERE id = ?", true, f.issue.ID)
+	require.NoError(t, err)
+	body := RedactTarget{Issue: f.issue.Index, Field: "body"}
+	require.ErrorIs(t, f.redact(t, body, secretscan_model.TextAccess{Issues: true}), util.ErrNotExist, "issues access doesn't reach a pull request")
+	require.NoError(t, f.redact(t, body, secretscan_model.TextAccess{Pulls: true}))
+	assert.NotContains(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: f.issue.ID}).Content, f.tok)
 }

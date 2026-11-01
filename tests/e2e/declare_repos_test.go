@@ -870,7 +870,7 @@ func seedSecretTextAlerts(t *testing.T, user *user_model.User, repo *repo_model.
 
 // seedSecretRedact stores, for each browser project of the spec (issue and alert 1 chromium, 2 firefox, 3 Mobile
 // Chrome), an issue whose body holds a secret and an alert with its places, with the fingerprint the detector gives,
-// so the Redact action finds the secret again; the place in the comment is stale (the secret was edited out).
+// so the Redact action finds the secret again; the secret was edited out of the comment, but its edit history holds it.
 func seedSecretRedact(t *testing.T, user *user_model.User, repo *repo_model.Repository) {
 	t.Helper()
 	ctx := db.DefaultContext
@@ -881,6 +881,9 @@ func seedSecretRedact(t *testing.T, user *user_model.User, repo *repo_model.Repo
 		require.NoError(t, db.Insert(ctx, issue))
 		comment := &issues_model.Comment{Type: issues_model.CommentTypeComment, IssueID: issue.ID, PosterID: user.ID, Content: "I rotated it already."}
 		require.NoError(t, db.Insert(ctx, comment))
+		// the comment held the secret before its poster edited it out: its edit history still does
+		require.NoError(t, issues_model.SaveIssueContentHistory(ctx, user.ID, issue.ID, comment.ID, comment.CreatedUnix, "Try "+tok, true))
+		require.NoError(t, issues_model.SaveIssueContentHistory(ctx, user.ID, issue.ID, comment.ID, comment.CreatedUnix+1, comment.Content, false))
 		alert := &secretscan_model.Alert{RepoID: repo.ID, RuleID: "github-token", SecretType: "github", LocationCount: 2, ViaPull: true, Fingerprint: secretdetection.Fingerprint([]byte(tok))}
 		require.NoError(t, secretscan_model.InsertAlert(ctx, alert))
 		locs := []*secretscan_model.Location{

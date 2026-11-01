@@ -36,10 +36,15 @@ type RedactTarget struct {
 var (
 	// ErrRedactTarget is a target that names no text.
 	ErrRedactTarget = util.NewInvalidArgumentErrorf("name the title or body of an issue, or a comment")
-	// ErrRedactGone is a text that no longer holds the secret of the alert: nothing is changed.
-	ErrRedactGone = util.NewInvalidArgumentErrorf("the secret is no longer in this text")
-	// ErrRedactManual is a text the detector can't point at the secret in (not plain text, or too costly to read whole).
+	// ErrRedactGone is a text whose place of the alert was already redacted, and that holds the secret nowhere any
+	// more (text, edit history, title changes, feed): nothing is left to remove.
+	ErrRedactGone = util.NewInvalidArgumentErrorf("the secret is no longer in this text or its history")
+	// ErrRedactManual is a text the detector can't read whole (not plain text, cut at the size limit, out of budget):
+	// it could miss a copy of the secret, so nothing is changed and the text must be edited by hand.
 	ErrRedactManual = util.NewInvalidArgumentErrorf("this text can't be redacted automatically: edit it")
+	// ErrRedactPattern is an alert whose rule is not used any more (a custom pattern deleted or turned off, generic
+	// rules turned off): the secret can't be found again, the text must be edited by hand.
+	ErrRedactPattern = util.NewInvalidArgumentErrorf("the pattern of this alert is no longer used: edit the text")
 	// ErrRedactChanged is a text that changed between its read and the write: nothing is changed, try again.
 	ErrRedactChanged = errors.New("the text changed meanwhile")
 )
@@ -65,20 +70,25 @@ func redact(d *secretdetection.Detector, text, ruleID, fingerprint string) (stri
 }
 
 // RedactText removes the secret of an alert from one text of an issue or pull request, for someone who may close the
-// alert (the caller checks that) and reads the text (access). The secret is found again by the detector in the text
-// as it is now (nothing of it is stored) and every span of it is replaced with RedactedMark. In one transaction the
-// text is written back on condition that it did not change since it was read (else ErrRedactChanged), the earlier
-// versions of its edit history are emptied (and, for a title, the secret in the title changes of the timeline and in
-// the activity feed), the alert's places in it are marked removed and an audit entry is recorded. It runs no notifier:
-// nobody is mailed and no webhook fires; the edit shows in the history as the doer's. A locked issue can be redacted.
-// An unknown alert or text, a text the alert has no place in and one the doer can't read are util.ErrNotExist.
-func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, index int64, target RedactTarget, access secretscan_model.TextAccess, canReadWiki bool) error {
+// alert (the caller checks that) and reads the text (access), and returns how many copies it replaced. The secret is
+// found again by the detector in the text as it is now (nothing of it is stored) and every span of it is replaced
+// with RedactedMark; a text the detector can't read whole is refused (ErrRedactManual), as a redaction that misses a
+// copy would claim too much. In one transaction the text is written back on condition that it did not change since it
+// was read (else ErrRedactChanged), the versions of its edit history are emptied (and the secret is removed from a
+// review's own copy of its body, from the title changes of the timeline and from the activity feed), the alert's
+// places in it are marked removed and an audit entry is recorded. When the secret is already gone from the text, the
+// rest is still done (0 copies replaced) as long as the place is open or a copy is left somewhere; else ErrRedactGone.
+// It runs no notifier and recreates no cross reference: nobody is mailed and no webhook fires; the edit shows in the
+// history as the doer's. A text reported as abusive keeps its moderation copy (made before the write, as any edit
+// does). A locked issue can be redacted. An unknown alert or text, a text the alert has no place in and one the doer
+// can't read are util.ErrNotExist.
+func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_model.User, index int64, target RedactTarget, access secretscan_model.TextAccess, canReadWiki bool) (int, error) {
 	if repo.IsArchived {
-		return ErrArchived
+		return 0, ErrArchived
 	}
 	alert, err := secretscan_model.GetVisibleAlert(ctx, repo.ID, index, canReadWiki)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var issue *issues_model.Issue
 	var comment *issues_model.Comment
@@ -86,32 +96,36 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 	switch {
 	case target.Comment > 0 && (target.Field == "" || target.Field == "comment"):
 		if comment, err = issues_model.GetCommentByID(ctx, target.Comment); err != nil {
-			return err
+			return 0, err
 		}
 		if issue, err = issues_model.GetIssueByID(ctx, comment.IssueID); err != nil {
-			return err
+			return 0, err
 		}
 		src = secretscan_model.TextSource{Kind: secretscan_model.KindComment, ID: comment.ID}
 	case target.Comment == 0 && target.Issue > 0 && (target.Field == "title" || target.Field == "body"):
 		if issue, err = issues_model.GetIssueByIndex(ctx, repo.ID, target.Issue); err != nil {
-			return err
+			return 0, err
 		}
 		src = secretscan_model.TextSource{Kind: secretscan_model.KindIssue, ID: issue.ID, Field: target.Field}
 	default:
-		return ErrRedactTarget
+		return 0, ErrRedactTarget
 	}
 	// a text the doer can't read is missing, as one the alert is not in: the answer tells nothing about it
 	if issue.RepoID != repo.ID || !(issue.IsPull && access.Pulls || !issue.IsPull && access.Issues) {
-		return util.ErrNotExist
+		return 0, util.ErrNotExist
 	}
-	if has, err := secretscan_model.HasTextPlace(ctx, repo.ID, alert.ID, src); err != nil {
-		return err
+	has, open, err := secretscan_model.TextPlaceState(ctx, repo.ID, alert.ID, src)
+	if err != nil {
+		return 0, err
 	} else if !has {
-		return util.ErrNotExist
+		return 0, util.ErrNotExist
 	}
 	d, err := textDetector(ctx, repo, setting.SecretScanningSettings(ctx))
 	if err != nil {
-		return err
+		return 0, err
+	}
+	if !d.HasRule(alert.RuleID) {
+		return 0, ErrRedactPattern
 	}
 	text := issue.Content
 	switch {
@@ -121,55 +135,95 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 		text = issue.Title
 	}
 	redacted, n, complete := redact(d, text, alert.RuleID, alert.Fingerprint)
-	switch {
-	case n == 0 && !complete:
-		return ErrRedactManual
-	case n == 0:
-		return ErrRedactGone
+	if !complete {
+		return 0, ErrRedactManual
 	}
 	redactAll := func(s string) (string, bool) {
 		out, n, _ := redact(d, s, alert.RuleID, alert.Fingerprint)
 		return out, n > 0
 	}
+	// an old version holds the secret also when it can't be read whole: erasing it is the safe side
+	holds := func(s string) bool {
+		_, n, complete := redact(d, s, alert.RuleID, alert.Fingerprint)
+		return n > 0 || !complete
+	}
 	err = db.WithTx(ctx, func(ctx context.Context) error {
+		var left int64 // copies found outside the text: history versions, review body, title changes, feed rows
+		var k int64
+		var err error
 		switch {
 		case comment != nil:
-			if err := clearContentHistory(ctx, issue.ID, comment.ID, comment.PosterID, comment.CreatedUnix); err != nil {
+			if left, err = eraseHistory(ctx, issue.ID, comment.ID, comment.PosterID, comment.CreatedUnix, n > 0, n > 0 || open, holds); err != nil {
 				return err
 			}
-			comment.Content = redacted
-			if err := issues_model.UpdateComment(ctx, comment, comment.ContentVersion, doer); err != nil {
+			if n > 0 {
+				if err := issues_model.IfNeededCreateShadowCopyForComment(ctx, comment, false); err != nil {
+					return err
+				}
+				// content and version only: no cross reference is made again, as the doer's
+				if affected, err := db.GetEngine(ctx).ID(comment.ID).Where("content_version = ?", comment.ContentVersion).Cols("content", "content_version").
+					Update(&issues_model.Comment{Content: redacted, ContentVersion: comment.ContentVersion + 1}); err != nil {
+					return err
+				} else if affected == 0 {
+					return ErrRedactChanged
+				}
+				if err := issues_model.SaveIssueContentHistory(ctx, doer.ID, issue.ID, comment.ID, timeutil.TimeStampNow(), redacted, false); err != nil {
+					return err
+				}
+			}
+			// a review's body is stored twice: in its comment and in the review itself (the reviews API reads that)
+			if comment.Type == issues_model.CommentTypeReview && comment.ReviewID > 0 {
+				if k, err = redactReview(ctx, comment.ReviewID, redactAll); err != nil {
+					return err
+				}
+				left += k
+			}
+			if k, err = redactFeed(ctx, builder.Eq{"repo_id": repo.ID, "comment_id": comment.ID}, redactAll); err != nil {
 				return err
 			}
-			if err := issues_model.SaveIssueContentHistory(ctx, doer.ID, issue.ID, comment.ID, timeutil.TimeStampNow(), redacted, false); err != nil {
-				return err
-			}
-			if err := redactFeed(ctx, builder.Eq{"repo_id": repo.ID, "comment_id": comment.ID}, redactAll); err != nil {
-				return err
-			}
+			left += k
 		case src.Field == "title":
-			old := issue.Title
-			issue.Title, _ = util.SplitStringAtByteN(redacted, 255) // as ChangeIssueTitle: the mark may be longer than a short secret
-			if affected, err := issues_model.UpdateIssueColsWithCond(ctx, issue, builder.Eq{"name": old}, "name"); err != nil {
-				return err
-			} else if affected == 0 {
-				return ErrRedactChanged
+			if n > 0 {
+				old := issue.Title
+				issue.Title, _ = util.SplitStringAtByteN(redacted, 255) // as ChangeIssueTitle: the mark may be longer than a short secret
+				if affected, err := issues_model.UpdateIssueColsWithCond(ctx, issue, builder.Eq{"name": old}, "name"); err != nil {
+					return err
+				} else if affected == 0 {
+					return ErrRedactChanged
+				}
 			}
-			if err := redactTitleChanges(ctx, issue.ID, redactAll); err != nil {
+			if left, err = redactTitleChanges(ctx, issue.ID, redactAll); err != nil {
 				return err
 			}
 			// the feed keeps the title of a new issue or pull request (and of a merge): ["<index>", "<title>", ...]
 			prefix := `["` + strconv.FormatInt(issue.Index, 10) + `",`
-			if err := redactFeed(ctx, builder.Eq{"repo_id": repo.ID}.And(builder.Like{"content", prefix + "%"}), redactAll); err != nil {
+			if k, err = redactFeed(ctx, builder.Eq{"repo_id": repo.ID, "comment_id": 0}.And(builder.Like{"content", prefix + "%"}), redactAll); err != nil {
 				return err
 			}
+			left += k
 		default:
-			if err := clearContentHistory(ctx, issue.ID, 0, issue.PosterID, issue.CreatedUnix); err != nil {
+			if left, err = eraseHistory(ctx, issue.ID, 0, issue.PosterID, issue.CreatedUnix, n > 0, n > 0 || open, holds); err != nil {
 				return err
 			}
-			if err := issues_model.ChangeIssueContent(ctx, issue, doer, redacted, issue.ContentVersion); err != nil {
-				return err
+			if n > 0 {
+				if err := issues_model.IfNeededCreateShadowCopyForIssue(ctx, issue); err != nil {
+					return err
+				}
+				version := issue.ContentVersion
+				issue.Content, issue.ContentVersion = redacted, version+1
+				// content and version only: no cross reference is made again, as the doer's
+				if affected, err := issues_model.UpdateIssueColsWithCond(ctx, issue, builder.Eq{"content_version": version}, "content", "content_version"); err != nil {
+					return err
+				} else if affected == 0 {
+					return ErrRedactChanged
+				}
+				if err := issues_model.SaveIssueContentHistory(ctx, doer.ID, issue.ID, 0, timeutil.TimeStampNow(), redacted, false); err != nil {
+					return err
+				}
 			}
+		}
+		if n == 0 && !open && left == 0 {
+			return ErrRedactGone
 		}
 		if err := secretscan_model.MarkTextPlacesRemoved(ctx, repo.ID, alert.ID, src); err != nil {
 			return err
@@ -181,15 +235,15 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 		if comment != nil {
 			data["comment_id"] = comment.ID
 		}
+		if n == 0 {
+			data["history_only"] = true
+		}
 		return repo_model.RecordRepoTarget(ctx, repo, audit_model.Event{
 			Action: "repo.secret_alert.text_redacted", TargetType: "secret_scanning_alert", TargetID: alert.ID, TargetName: alert.RuleID, Data: data,
 		})
 	})
-	if errors.Is(err, issues_model.ErrIssueAlreadyChanged) || errors.Is(err, issues_model.ErrCommentAlreadyChanged) {
-		return ErrRedactChanged
-	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// after the commit: the search index drops the old text, and the text is scanned again (its other places may have
 	// moved when a secret of several lines became one); a scan by nobody (0) mails nobody
@@ -199,56 +253,98 @@ func RedactText(ctx context.Context, repo *repo_model.Repository, doer *user_mod
 	} else {
 		enqueueIssueText(ctx, issue.ID, 0)
 	}
-	return nil
+	return n, nil
 }
 
-// clearContentHistory empties every version in the edit history of a text (an issue's body: commentID 0). A text
-// that was never edited gets the entry of its first version, empty, so the history shows that it was edited.
-func clearContentHistory(ctx context.Context, issueID, commentID, posterID int64, created timeutil.TimeStamp) error {
-	has, err := issues_model.HasIssueContentHistory(ctx, issueID, commentID)
-	if err != nil {
-		return err
-	}
-	if !has {
-		if err := issues_model.SaveIssueContentHistory(ctx, posterID, issueID, commentID, created, "", true); err != nil {
-			return err
+// eraseHistory empties the versions in the edit history of a text (an issue's body: commentID 0) when one of them
+// holds the secret, or always with force, and returns how many it emptied. A text that was never edited and is
+// written now (writing) first gets the entry of its first version, empty, so that the history shows the edit.
+func eraseHistory(ctx context.Context, issueID, commentID, posterID int64, created timeutil.TimeStamp, writing, force bool, holds func(string) bool) (int64, error) {
+	cond := builder.Eq{"issue_id": issueID, "comment_id": commentID, "is_deleted": false}
+	if !force {
+		var versions []*issues_model.ContentHistory
+		if err := db.GetEngine(ctx).Where(cond).Cols("id", "content_text").Find(&versions); err != nil {
+			return 0, err
+		}
+		if !slices.ContainsFunc(versions, func(v *issues_model.ContentHistory) bool { return holds(v.ContentText) }) {
+			return 0, nil
 		}
 	}
-	_, err = db.GetEngine(ctx).Where("issue_id = ? AND comment_id = ?", issueID, commentID).Cols("is_deleted", "content_text").
-		Update(&issues_model.ContentHistory{IsDeleted: true})
-	return err
+	if writing {
+		// soft-deleted versions count here too, so a text redacted before gets no second first version
+		has, err := issues_model.HasIssueContentHistory(ctx, issueID, commentID)
+		if err != nil {
+			return 0, err
+		}
+		if !has {
+			if err := issues_model.SaveIssueContentHistory(ctx, posterID, issueID, commentID, created, "", true); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return db.GetEngine(ctx).Where(cond).Cols("is_deleted", "content_text").Update(&issues_model.ContentHistory{IsDeleted: true})
+}
+
+// redactReview removes the secret from a review's own copy of its body.
+func redactReview(ctx context.Context, reviewID int64, redactAll func(string) (string, bool)) (int64, error) {
+	review, err := issues_model.GetReviewByID(ctx, reviewID)
+	if err != nil {
+		if issues_model.IsErrReviewNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	content, ok := redactAll(review.Content)
+	if !ok {
+		return 0, nil
+	}
+	return db.GetEngine(ctx).ID(review.ID).Cols("content").NoAutoTime().Update(&issues_model.Review{Content: content})
 }
 
 // redactTitleChanges removes the secret from the title changes of the issue's timeline.
-func redactTitleChanges(ctx context.Context, issueID int64, redactAll func(string) (string, bool)) error {
+func redactTitleChanges(ctx context.Context, issueID int64, redactAll func(string) (string, bool)) (int64, error) {
 	var changes []*issues_model.Comment
 	if err := db.GetEngine(ctx).Where("issue_id = ? AND type = ?", issueID, issues_model.CommentTypeChangeTitle).Cols("id", "old_title", "new_title").Find(&changes); err != nil {
-		return err
+		return 0, err
 	}
+	var count int64
 	for _, c := range changes {
 		oldTitle, a := redactAll(c.OldTitle)
 		newTitle, b := redactAll(c.NewTitle)
 		if a || b {
 			if _, err := db.GetEngine(ctx).ID(c.ID).Cols("old_title", "new_title").NoAutoTime().Update(&issues_model.Comment{OldTitle: oldTitle, NewTitle: newTitle}); err != nil {
-				return err
+				return 0, err
 			}
+			count++
 		}
 	}
-	return nil
+	return count, nil
 }
 
-// redactFeed removes the secret from the activity feed's copies of a text.
-func redactFeed(ctx context.Context, cond builder.Cond, redactAll func(string) (string, bool)) error {
+// redactFeed removes the secret from the activity feed's copies of a text. The feed has one row per watcher, mostly
+// with the same content: each distinct content is redacted once and written with one UPDATE by ID list.
+func redactFeed(ctx context.Context, cond builder.Cond, redactAll func(string) (string, bool)) (int64, error) {
 	var actions []*activities_model.Action
 	if err := db.GetEngine(ctx).Where(cond).Cols("id", "content").Find(&actions); err != nil {
-		return err
+		return 0, err
 	}
+	byContent := map[string][]int64{}
 	for _, a := range actions {
-		if content, ok := redactAll(a.Content); ok {
-			if _, err := db.GetEngine(ctx).ID(a.ID).Cols("content").Update(&activities_model.Action{Content: content}); err != nil {
-				return err
+		byContent[a.Content] = append(byContent[a.Content], a.ID)
+	}
+	var count int64
+	for old, ids := range byContent {
+		content, ok := redactAll(old)
+		if !ok {
+			continue
+		}
+		for chunk := range slices.Chunk(ids, 500) { // under every database's limit of bound values
+			affected, err := db.GetEngine(ctx).In("id", chunk).Cols("content").Update(&activities_model.Action{Content: content})
+			if err != nil {
+				return 0, err
 			}
+			count += affected
 		}
 	}
-	return nil
+	return count, nil
 }

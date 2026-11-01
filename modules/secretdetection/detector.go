@@ -116,6 +116,11 @@ func NewDetector(rules []Rule) (*Detector, error) {
 	return d, nil
 }
 
+// HasRule tells whether the detector runs the rule with that ID.
+func (d *Detector) HasRule(id string) bool {
+	return slices.ContainsFunc(d.rules, func(r *compiledRule) bool { return r.ID == id })
+}
+
 type rawFinding struct {
 	rule        *compiledRule
 	start, end  int

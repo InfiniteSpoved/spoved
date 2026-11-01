@@ -432,6 +432,7 @@ func SecretAlert(ctx *context.Context) {
 		}
 	}
 	ctx.Data["Posters"] = posters
+	ctx.Data["RedactedMark"] = secretscan_service.RedactedMark
 	ctx.Data["Locations"] = convert.ToSecretScanningLocations(repo, locs, texts, func(path string) string { return wiki_service.PageHTMLURL(repo, path) })
 	titles := map[string]string{}
 	for _, l := range locs {
@@ -541,19 +542,31 @@ func SecretAlertRedact(ctx *context.Context) {
 		return
 	}
 	target := secretscan_service.RedactTarget{Issue: ctx.FormInt64("issue"), Field: ctx.FormString("field"), Comment: ctx.FormInt64("comment")}
-	err := secretscan_service.RedactText(ctx, ctx.Repo.Repository, ctx.Doer, ctx.ParamsInt64(":index"), target, secretTextAccess(ctx), ctx.Repo.CanRead(unit.TypeWiki))
+	n, err := secretscan_service.RedactText(ctx, ctx.Repo.Repository, ctx.Doer, ctx.ParamsInt64(":index"), target, secretTextAccess(ctx), ctx.Repo.CanRead(unit.TypeWiki))
+	title := target.Field == "title"
 	switch {
+	case err == nil && n > 0 && title:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.done_title", secretscan_service.RedactedMark))
+	case err == nil && n > 0:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.done", secretscan_service.RedactedMark))
+	case err == nil && title:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.history_only_title"))
 	case err == nil:
-		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.done"))
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.history_only"))
 	case errors.Is(err, secretscan_service.ErrRedactTarget):
 		ctx.NotFound("SecretAlertRedact", err)
 		return
 	case errors.Is(err, secretscan_service.ErrRedactGone):
-		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.gone"))
+		ctx.Flash.Info(ctx.Tr("repo.secrets.redact.gone"))
 	case errors.Is(err, secretscan_service.ErrRedactManual):
 		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.manual"))
+	case errors.Is(err, secretscan_service.ErrRedactPattern):
+		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.pattern"))
 	case errors.Is(err, secretscan_service.ErrRedactChanged):
 		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.changed"))
+	case errors.Is(err, util.ErrInvalidArgument): // none other is expected: never the close form's message
+		ctx.ServerError("SecretAlertRedact", err)
+		return
 	case secretAlertError(ctx, err) && ctx.Written():
 		return
 	}

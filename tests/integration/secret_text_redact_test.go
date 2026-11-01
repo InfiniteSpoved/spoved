@@ -98,7 +98,7 @@ func TestSecretTextRedact(t *testing.T) {
 
 		since := auditMaxID(t)
 		secretPost(t, owner, page+"/redact", url.Values{"issue": {"9301"}, "field": {"body"}}, http.StatusSeeOther)
-		assert.Contains(t, flashMessage(t, owner), "The secret was removed from the text")
+		assert.Contains(t, flashMessage(t, owner), "The secret was replaced with [secret removed] and its earlier versions were deleted from the edit history. Revoke it, then close the alert.")
 		assert.Equal(t, "use\n"+secretscan_service.RedactedMark+"\nfor staging", s.body(t))
 		e := auditOne(t, since, "repo.secret_alert.text_redacted")
 		assert.Equal(t, s.alert.ID, e.TargetID)
@@ -125,22 +125,39 @@ func TestSecretTextRedact(t *testing.T) {
 		assert.NotContains(t, resp.Body.String(), s.tok[4:])
 
 		doc = secretPage(t, owner, page, http.StatusOK)
-		assert.Equal(t, 1, doc.Find("button.secret-redact").Length(), "the place in the body is removed: no button")
+		assert.Equal(t, 2, doc.Find("button.secret-redact").Length(), "a removed place keeps its button: its history may hold the secret")
+		assert.Equal(t, "Redact the secret from Issue #9301 · description", body.AttrOr("aria-label", ""))
 		assert.Contains(t, doc.Find(".secret-locations").Text(), "Removed from the text")
-		assert.Contains(t, doc.Find("#secret-activity").Text(), "removed the secret from the text")
+		assert.Contains(t, doc.Find("#secret-activity").Text(), "removed the secret from an issue or pull request text")
 
-		// again: the secret is gone, nothing changes and nothing is recorded
+		// again: nothing is left, nothing changes and nothing is recorded
 		since = auditMaxID(t)
 		secretPost(t, owner, page+"/redact", url.Values{"issue": {"9301"}, "field": {"body"}}, http.StatusSeeOther)
-		assert.Contains(t, flashMessage(t, owner), "no longer in this text")
+		assert.Contains(t, flashMessage(t, owner), "Nothing left to remove")
 		var n int64
 		_, err := db.GetEngine(t.Context()).Table("audit_event").Where("id > ? AND action = ?", since, "repo.secret_alert.text_redacted").Select("COUNT(*)").Get(&n)
 		require.NoError(t, err)
 		assert.Zero(t, n)
 
-		// the comment
+		// the comment, after its poster edited the secret out: its edit history is still erased
+		require.NoError(t, issues_model.SaveIssueContentHistory(t.Context(), 5, s.issue.ID, s.comment.ID, s.comment.CreatedUnix, s.comment.Content, true))
+		require.NoError(t, issues_model.SaveIssueContentHistory(t.Context(), 5, s.issue.ID, s.comment.ID, s.comment.CreatedUnix+1, "again (edited)", false))
+		_, err = db.GetEngine(t.Context()).ID(s.comment.ID).Cols("content").Update(&issues_model.Comment{Content: "again (edited)"})
+		require.NoError(t, err)
+		since = auditMaxID(t)
 		secretPost(t, owner, page+"/redact", url.Values{"comment": {fmt.Sprint(s.comment.ID)}}, http.StatusSeeOther)
-		assert.Equal(t, "again "+secretscan_service.RedactedMark, unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: s.comment.ID}).Content)
+		assert.Contains(t, flashMessage(t, owner), "The secret was already gone from the text. Its earlier versions were deleted from the edit history.")
+		assert.Equal(t, "again (edited)", unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: s.comment.ID}).Content)
+		history = nil
+		require.NoError(t, db.GetEngine(t.Context()).Where("comment_id = ?", s.comment.ID).Find(&history))
+		require.Len(t, history, 2)
+		for _, h := range history {
+			assert.True(t, h.IsDeleted)
+			assert.Empty(t, h.ContentText)
+		}
+		data = auditData(t, auditOne(t, since, "repo.secret_alert.text_redacted"))
+		assert.Equal(t, true, data["history_only"])
+		assert.EqualValues(t, 0, data["replaced"])
 
 		// a target that names no text: 404
 		secretPost(t, owner, page+"/redact", url.Values{"issue": {"9301"}, "field": {"path"}}, http.StatusNotFound)
@@ -240,6 +257,22 @@ func TestSecretTextRedact(t *testing.T) {
 
 		MakeRequest(t, NewRequestWithJSON(t, "POST", path, api.RedactSecretScanningTextOption{CommentID: s.comment.ID}).AddTokenAuth(write), http.StatusNoContent)
 		assert.NotContains(t, unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: s.comment.ID}).Content, s.tok)
+
+		// a review's body: the reviews API reads the review's own copy, which is redacted too
+		pr := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{RepoID: 1, Index: 2})
+		review := &issues_model.Review{Type: issues_model.ReviewTypeComment, ReviewerID: 2, IssueID: pr.ID, Content: "see " + s.tok}
+		require.NoError(t, db.Insert(t.Context(), review))
+		reviewComment := &issues_model.Comment{Type: issues_model.CommentTypeReview, IssueID: pr.ID, PosterID: 2, ReviewID: review.ID, Content: review.Content}
+		require.NoError(t, db.Insert(t.Context(), reviewComment))
+		place := secretscan_model.NewTextLocation(1, secretscan_model.KindComment, reviewComment.ID, pr.ID, "", 1, 1, 2)
+		place.AlertID = s.alert.ID
+		require.NoError(t, secretscan_model.InsertLocations(t.Context(), []*secretscan_model.Location{place}))
+		reviews := MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/pulls/2/reviews").AddTokenAuth(write), http.StatusOK)
+		require.Contains(t, reviews.Body.String(), s.tok)
+		MakeRequest(t, NewRequestWithJSON(t, "POST", path, api.RedactSecretScanningTextOption{CommentID: reviewComment.ID}).AddTokenAuth(write), http.StatusNoContent)
+		reviews = MakeRequest(t, NewRequest(t, "GET", "/api/v1/repos/user2/repo1/pulls/2/reviews").AddTokenAuth(write), http.StatusOK)
+		assert.NotContains(t, reviews.Body.String(), s.tok)
+		assert.Contains(t, reviews.Body.String(), "see "+secretscan_service.RedactedMark)
 
 		// scanning off: the route is gone
 		restore := test.MockVariableValue(&setting.SecretScanning.Enabled, false)
