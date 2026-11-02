@@ -39,6 +39,9 @@ test('org deploy key with selected repositories', async ({page}) => {
   await picker.click();
   await picker.locator('.menu .item', {hasText: /^repo3$/}).click();
   await expect(picker.locator('input[name="repo_ids"]')).toHaveValue('3');
+  // a multiple selection stays open; with more repositories in org3 its menu covers the button
+  await page.keyboard.press('Escape');
+  await expect(picker.locator('.menu')).toBeHidden();
   await screenshot(page);
   await form.getByRole('button', {name: 'Add deploy key'}).click();
 
