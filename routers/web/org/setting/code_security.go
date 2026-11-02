@@ -13,6 +13,7 @@ import (
 	"forgejo.org/modules/base"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
+	shared_security "forgejo.org/routers/web/shared/security"
 	"forgejo.org/services/context"
 	dependency_service "forgejo.org/services/dependency"
 	secretscan_service "forgejo.org/services/secretscan"
@@ -24,7 +25,10 @@ const (
 )
 
 // CodeSecurity shows the organization's dependency graph switch.
-func CodeSecurity(ctx *context.Context) {
+func CodeSecurity(ctx *context.Context) { codeSecurityPage(ctx, http.StatusOK) }
+
+// codeSecurityPage renders the page; a refused pattern is shown again with its status.
+func codeSecurityPage(ctx *context.Context, status int) {
 	ctx.Data["Title"] = ctx.Tr("org.settings.code_security")
 	ctx.Data["PageIsOrgSettingsCodeSecurity"] = true
 	sw, err := dependency_service.GetOrgSwitch(ctx, ctx.Org.Organization.ID)
@@ -40,7 +44,13 @@ func CodeSecurity(ctx *context.Context) {
 		ctx.ServerError("secretScanningBox", err)
 		return
 	}
-	ctx.HTML(http.StatusOK, tplSettingsCodeSecurity)
+	org := ctx.Org.Organization.AsUser()
+	scope := secretscan_service.Scope{Org: ctx.Org.Organization, Doer: ctx.Doer, Admin: ctx.IsUserSiteAdmin()}
+	if err := shared_security.LoadPatterns(ctx, org, scope, ctx.Org.OrgLink+"/settings/code_security/patterns", ctx.Org.OrgLink+"/security/secrets", true, true); err != nil {
+		ctx.ServerError("LoadPatterns", err)
+		return
+	}
+	ctx.HTML(status, tplSettingsCodeSecurity)
 }
 
 // secretScanningBox loads the organization's secret scanning switch and what the confirmations say: how many
@@ -155,4 +165,21 @@ func CodeSecurityPost(ctx *context.Context) {
 		ctx.Flash.Success(ctx.Tr("repo.settings.dependency_graph.saved"))
 	}
 	ctx.Redirect(ctx.Org.OrgLink + "/settings/code_security")
+}
+
+// SecretPatternAdd saves a custom pattern of the organization; a refusal shows the page again with the reason.
+func SecretPatternAdd(ctx *context.Context) {
+	if !shared_security.PatternAdd(ctx, ctx.Org.Organization.AsUser()) {
+		if !ctx.Written() {
+			codeSecurityPage(ctx, http.StatusUnprocessableEntity)
+		}
+		return
+	}
+	ctx.Redirect(ctx.Org.OrgLink + "/settings/code_security#custom-patterns")
+}
+
+// SecretPatternAction renames, turns on, turns off or deletes a pattern of the organization (the ID is looked up
+// within it, so another owner's pattern is not found).
+func SecretPatternAction(ctx *context.Context) {
+	shared_security.PatternAction(ctx, ctx.Org.Organization.AsUser(), ctx.Params("action"), ctx.Org.OrgLink+"/settings/code_security#custom-patterns")
 }

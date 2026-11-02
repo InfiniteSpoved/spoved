@@ -51,6 +51,11 @@ func (r *Response) Write(bs []byte) (int, error) {
 	return size, nil
 }
 
+// Unwrap gives http.ResponseController the writer underneath (a write deadline, for example).
+func (r *Response) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 func (r *Response) Status() int {
 	return r.status
 }

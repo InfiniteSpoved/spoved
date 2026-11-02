@@ -53,12 +53,12 @@ func TestRejectedMatchesAreCappedForCustomRules(t *testing.T) {
 }
 
 func TestCustomKeywordMustBeInTheMatchWhenScanning(t *testing.T) {
-	pattern := `(?:err|\t)([a-z]{8,20})` // the keyword is only in one branch
-	require.NoError(t, ValidateCustomRule("rule", pattern, "errabcdefghij", []string{"err"}))
-	d := customDetector(t, pattern, "err")
+	pattern := `(?:zork|\t)([a-z]{8,20})` // the keyword is only in one branch
+	require.NoError(t, ValidateCustomRule("rule", pattern, "zorkabcdefghij", []string{"zork"}))
+	d := customDetector(t, pattern, "zork")
 	word := fake(10, "abcdefghijklmnopqrstuvwxyz")
-	assert.Empty(t, scanOf(d, []byte("if err != nil {\n\treturn "+word+"\n}\n")), "a tab branch, err only nearby")
-	assert.Len(t, scanOf(d, []byte("x err"+word)), 1)
+	assert.Empty(t, scanOf(d, []byte("if zork != nil {\n\treturn "+word+"\n}\n")), "a tab branch, zork only nearby")
+	assert.Len(t, scanOf(d, []byte("x zork"+word)), 1)
 	// also when the keyword is in an optional part
 	d = customDetector(t, `(?:acme_)?([a-z]{8,20})`, "acme_")
 	assert.Empty(t, scanOf(d, []byte("acme_ and "+word+"\n")))
@@ -70,6 +70,7 @@ func TestCustomWindowsAreNeverCut(t *testing.T) {
 	dense := strings.Repeat("acme_ filler text goes here\n", 60000)
 	secret := "acme_" + fake(12, alnum)
 	d := customDetector(t, `acme_[A-Za-z0-9]{12}`, "acme_")
+	d.MaxWork = 1 << 30 // the custom rules' default budget runs out on so dense a file, which is not tested here
 	fs, complete := d.Scan([]byte(dense + secret + "\n"))
 	assert.Len(t, fs, 1)
 	assert.True(t, complete)

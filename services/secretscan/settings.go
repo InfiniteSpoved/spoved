@@ -193,10 +193,11 @@ func readLocked[T any](ctx context.Context, key string, into *T) error {
 	return nil
 }
 
-// SaveSwitches stores the site switch and the generic rule (the first form of the Site administration page). A value
-// that is what is in force already is not stored again. Turning the site on queues the scanned repositories.
-func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic bool) (changed bool, err error) {
-	turnedOn := false
+// SaveSwitches stores the site switch, the generic rule and the text scan (the first form of the Site administration page). A value
+// that is what is in force already is not stored again. Turning the site on queues the scanned repositories; turning
+// the text scan on also makes every repository's text scan start again (text written while it was off).
+func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic, scanText bool) (changed bool, err error) {
+	turnedOn, textOn := false, false
 	changed, err = updateSettings(ctx, doer, func(state *setting.SecretScanningState, cfg *setting.SecretScanningConfig) (bool, bool) {
 		stateChanged, cfgChanged := false, false
 		if state.Enabled() != enabled {
@@ -208,8 +209,16 @@ func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic b
 		if cfg.Merge().GenericRules != generic {
 			cfg.GenericRules, cfgChanged = &generic, true
 		}
+		if cfg.Merge().ScanText != scanText {
+			cfg.ScanText, cfgChanged, textOn = &scanText, true, scanText
+		}
 		return stateChanged, cfgChanged
 	}, func(ctx context.Context) error {
+		if textOn {
+			if err := secretscan_model.ResetTextScans(ctx, 0); err != nil {
+				return err
+			}
+		}
 		if !turnedOn {
 			return nil
 		}
@@ -220,6 +229,8 @@ func SaveSwitches(ctx context.Context, doer *user_model.User, enabled, generic b
 	}
 	if changed && turnedOn {
 		log.Info("Secret scanning turned on by %s", doer.Name)
+	}
+	if changed && (turnedOn || textOn) {
 		requeue()
 	}
 	return changed, nil

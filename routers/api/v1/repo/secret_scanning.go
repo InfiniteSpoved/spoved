@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 
+	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unit"
@@ -138,9 +139,12 @@ func GetSecretScanningStatus(ctx *context.APIContext) {
 		ctx.Error(http.StatusInternalServerError, "FindScans", err)
 		return
 	}
-	if !ctx.Permission().CanRead(unit.TypeWiki) { // the wiki's state is for those who can read it
-		scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool { return s.Kind == secretscan_model.KindWiki })
-	}
+	// the wiki's state is for those who can read it, the text's for those who can read its units
+	canReadWiki := ctx.Permission().CanRead(unit.TypeWiki)
+	canReadText := secretscan_service.TextStatusVisible(ctx, ctx.Repo().Repository, ctx.Permission().CanRead)
+	scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool {
+		return s.Kind == secretscan_model.KindWiki && !canReadWiki || s.Kind == secretscan_model.KindIssue && !canReadText
+	})
 	ctx.JSON(http.StatusOK, convert.ToSecretScanningStatus(scans))
 }
 
@@ -345,5 +349,101 @@ func ListSecretScanningAlertLocations(ctx *context.APIContext) {
 	}
 	ctx.SetLinkHeader(int(total), opts.PageSize)
 	ctx.SetTotalCountHeader(total)
-	ctx.JSON(http.StatusOK, convert.ToSecretScanningLocations(repo, locs, func(path string) string { return wiki_service.PageHTMLURL(repo, path) }))
+	// a place in text is data of the issue tracker: a token with scopes needs read:issue for it, as for /issues
+	access := secretscan_model.TextAccess{Issues: ctx.Permission().CanRead(unit.TypeIssues), Pulls: ctx.Permission().CanRead(unit.TypePullRequests)}
+	if has, scope := ctx.Authentication().Scope().Get(); has {
+		if ok, err := scope.HasScope(auth_model.AccessTokenScopeReadIssue); err != nil || !ok {
+			access = secretscan_model.TextAccess{}
+		}
+	}
+	texts, err := secretscan_model.LoadTextPlaces(ctx, repo.ID, locs, access)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "LoadTextPlaces", err)
+		return
+	}
+	ctx.JSON(http.StatusOK, convert.ToSecretScanningLocations(repo, locs, texts, func(path string) string { return wiki_service.PageHTMLURL(repo, path) }))
+}
+
+// RedactSecretScanningText removes the secret of an alert from one text of an issue or pull request
+func RedactSecretScanningText(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/secret-scanning/alerts/{index}/redact repository repoRedactSecretScanningText
+	// ---
+	// summary: Remove the secret of an alert from the text of an issue, pull request or comment
+	// description: For people who may resolve the alert and read the issue or pull request (a token with scopes also
+	//   needs write:issue). The secret is found again in the text as it is now and every copy of it is replaced with
+	//   "[secret removed]"; the versions in the text's edit history are emptied (for a title, the secret is removed from
+	//   the title changes of the timeline), the alert's places in the text are marked removed and the change is
+	//   audited. When the secret is already gone from the text, only the history versions that hold it are emptied
+	//   and the rest is done (204 too). Nobody is notified. It can't be undone, and the secret must still be revoked.
+	//   A text the alert has no place in, or that the caller can't read, is 404; a text the detector can't read whole,
+	//   an alert whose pattern is no longer used and a text with nothing left to remove are 422, a text that changed
+	//   while it was redacted 409.
+	// consumes:
+	// - application/json
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: index
+	//   in: path
+	//   description: number of the alert
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// - name: body
+	//   in: body
+	//   schema:
+	//     "$ref": "#/definitions/RedactSecretScanningTextOption"
+	// responses:
+	//   "204":
+	//     "$ref": "#/responses/empty"
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "409":
+	//     "$ref": "#/responses/conflict"
+	//   "422":
+	//     "$ref": "#/responses/validationError"
+	//   "423":
+	//     "$ref": "#/responses/repoArchivedError"
+
+	// the text is data of the issue tracker: a token with scopes needs write:issue, asked before anything is looked up
+	if has, scope := ctx.Authentication().Scope().Get(); has {
+		if ok, err := scope.HasScope(auth_model.AccessTokenScopeWriteIssue); err != nil || !ok {
+			ctx.Error(http.StatusForbidden, "", "the token needs the write:issue scope")
+			return
+		}
+	}
+	form := web.GetForm(ctx).(*api.RedactSecretScanningTextOption)
+	alert := loadSecretScanningAlert(ctx)
+	if alert == nil {
+		return
+	}
+	perm := ctx.Permission()
+	target := secretscan_service.RedactTarget{Issue: form.IssueNumber, Field: form.Field, Comment: form.CommentID}
+	access := secretscan_model.TextAccess{Issues: perm.CanRead(unit.TypeIssues), Pulls: perm.CanRead(unit.TypePullRequests)}
+	switch _, err := secretscan_service.RedactText(ctx, ctx.Repo().Repository, ctx.Doer(), alert.Index, target, access, perm.CanRead(unit.TypeWiki)); {
+	case err == nil:
+		ctx.Status(http.StatusNoContent)
+	case errors.Is(err, util.ErrInvalidArgument):
+		ctx.Error(http.StatusUnprocessableEntity, "", err.Error())
+	case errors.Is(err, util.ErrNotExist):
+		ctx.NotFound()
+	case errors.Is(err, secretscan_service.ErrRedactChanged):
+		ctx.Error(http.StatusConflict, "", "the text changed meanwhile, try again")
+	case errors.Is(err, secretscan_service.ErrArchived):
+		ctx.Error(http.StatusLocked, "", "the repository is archived")
+	default:
+		ctx.Error(http.StatusInternalServerError, "RedactText", err)
+	}
 }

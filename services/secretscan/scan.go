@@ -155,6 +155,12 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 	// one scan of a repository at a time, and at most MAX_CONCURRENT_SCANS of all, counted only while one runs
 	unlock := repoScans.Lock(strconv.FormatInt(repo.ID, 10))
 	defer unlock()
+	// read once per scan (a disable or a delete counts from the next scan on), and before the slot: loading and
+	// checking them is not scan work
+	custom, err := customRules(ctx, repo)
+	if err != nil {
+		return false, err
+	}
 	release, err := acquireSlot(ctx)
 	if err != nil {
 		return false, err
@@ -168,7 +174,7 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 			rules = append(rules, r)
 		}
 	}
-	detector, err := secretdetection.NewDetector(rules)
+	detector, err := secretdetection.NewDetector(append(rules, custom...))
 	if err != nil {
 		return false, err
 	}
@@ -193,6 +199,13 @@ func scan(ctx context.Context, repoID int64) (requeue bool, err error) {
 		if kind != secretscan_model.KindPull && !rq && kerr == nil { // the digest never waits for the pull refs
 			states[kind] = readKindState(ctx, repo.ID, kind)
 		}
+	}
+	if !requeue && ctx.Err() == nil {
+		// the text there is already is read after the code, a slice at a time; it doesn't depend on the code's tips, so
+		// a code scan that failed (and backs off) doesn't hold it up
+		rq, terr := s.scanText()
+		requeue = requeue || rq
+		err = errors.Join(err, terr)
 	}
 	finishDigest(ctx, repo, mark, states) // waits for the kinds the push touched, never for the pull refs
 	if mark == nil && states[secretscan_model.KindRepo].current {
@@ -241,6 +254,7 @@ type candidate struct {
 	ruleID, fingerprint string
 	locs                map[string]*secretscan_model.Location // by path hash and line
 	extra               int
+	poster              int64 // of a secret in text: who wrote the first place found (0: nobody known)
 }
 
 // run is the scan of one git repository (the repository, its wiki or its pull refs) in one slice.
@@ -250,7 +264,7 @@ type run struct {
 	gitRepo *git.Repository
 	old     *secretscan_model.Scan // the row as stored last, nil when there is none
 	done    []string               // commits whose history is scanned, as stored
-	keyCap  int64
+	keyCap  int64                  // distinct secrets of built-in rules; custom patterns have half as many of their own (customCap)
 	// the totals of the scan under way (over its slices), as stored in the row
 	totBlobs, totBytes, totSkipped int64
 	// what this slice has seen
@@ -262,6 +276,7 @@ type run struct {
 	found                map[string]*foundBlob
 	seen                 map[string]struct{} // blobs read (or too large)
 	keys                 map[string]struct{} // distinct (rule, fingerprint)
+	customKeys           int64               // of keys, those of custom patterns
 	locBytes             int
 	exclude              []string // commits the log leaves out besides done: the branches' tips, for the pull refs
 	buf                  []byte
@@ -316,8 +331,9 @@ func (s *scanner) scanKind(kind string) (requeue bool, err error) {
 			return false, nil // nothing new; the status stays as it is
 		}
 		if old.RetryUnix > 0 { // a scan under way or after a failure: its totals go on
-			r.totBlobs, r.totBytes, r.totSkipped = old.Blobs, old.Bytes, old.SkippedLarge
+			r.totBlobs, r.totBytes = old.Blobs, old.Bytes
 		}
+		r.totSkipped = old.SkippedLarge // a file that was never read stays counted until a rescan from the beginning
 	}
 	afterTips(s.repo.ID, kind)
 	if r.done, err = existingTips(s.scanCtx, r.gitRepo, stored); err != nil {
@@ -535,11 +551,16 @@ func (r *run) scanBlob(c change, content []byte) (err error) {
 	for _, f := range findings {
 		key := f.RuleID + "|" + f.Fingerprint
 		if _, seen := r.keys[key]; !seen {
-			if int64(len(r.keys)) >= r.keyCap {
+			// custom patterns count apart, so they can't push a built-in rule's secrets out
+			_, custom := secretscan_model.ParseCustomRuleID(f.RuleID)
+			if !custom && int64(len(r.keys))-r.customKeys >= r.keyCap || custom && r.customKeys >= customCap(r.keyCap) {
 				r.left++ // more distinct secrets than alerts are kept: this one is left out (a hole)
 				continue
 			}
 			r.keys[key] = struct{}{}
+			if custom {
+				r.customKeys++
+			}
 		}
 		fb.findings = append(fb.findings, blobFinding{ruleID: f.RuleID, fingerprint: f.Fingerprint, start: f.StartLine, end: f.EndLine})
 	}
@@ -580,7 +601,7 @@ func (r *run) candidates() []*candidate {
 				case int64(len(c.locs)) >= r.cfg.MaxLocationsPerAlert:
 					c.extra++
 				default:
-					c.locs[key] = secretscan_model.NewLocation(r.repo.ID, locKind(r.kind), id, p.path, f.start, f.end, p.commit.ID, p.commit.AuthorName, p.commit.AuthorEmail, p.commit.Unix)
+					c.locs[key] = secretscan_model.NewLocation(r.repo.ID, r.kind, id, p.path, f.start, f.end, p.commit.ID, p.commit.AuthorName, p.commit.AuthorEmail, p.commit.Unix)
 				}
 			}
 		}
@@ -588,14 +609,6 @@ func (r *run) candidates() []*candidate {
 	return slices.SortedFunc(maps.Values(byKey), func(a, b *candidate) int {
 		return cmp.Or(cmp.Compare(a.ruleID, b.ruleID), cmp.Compare(a.fingerprint, b.fingerprint))
 	})
-}
-
-// locKind is the kind stored on a place: the pull refs are part of the repository.
-func locKind(kind string) string {
-	if kind == secretscan_model.KindPull {
-		return secretscan_model.KindRepo
-	}
-	return kind
 }
 
 // finish stores what the slice did in one transaction: the alerts and the row, with the new done tips (the ref tips
@@ -686,7 +699,7 @@ func (r *run) write(st *secretscan_model.Scan, cands []*candidate) error {
 		if owner != r.repo.OwnerID {
 			return errOwnerMoved
 		}
-		left, err := writeAlerts(ctx, cfg, r.repo.ID, locKind(r.kind), r.kind == secretscan_model.KindPull, cands)
+		left, err := writeAlerts(ctx, cfg, r.repo.ID, r.kind, r.kind == secretscan_model.KindPull, cands, nil)
 		if err != nil {
 			return err
 		}
@@ -725,20 +738,35 @@ func (r *run) write(st *secretscan_model.Scan, cands []*candidate) error {
 	return errStoreFail
 }
 
+// customCap is the share of an alert cap that custom patterns have on top of the built-in rules' cap.
+func customCap(limit int64) int64 { return max(limit/2, 1) }
+
 // writeAlerts stores the alerts and their places, relying on the unique keys: an alert or a place that is already
 // there is not stored again. It reads and writes in batches (a few queries per batch of alerts, none per place).
 // Places over MAX_LOCATIONS_PER_ALERT are only counted. A new alert is left out (counted in left, a hole) when the repository has
-// MAX_ALERTS_PER_REPO open alerts, or, for a secret only refs/pull/* reach (which any reader can write), when half of
-// that many open alerts are of that kind: the branches and tags always have room.
-func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID int64, kind string, viaPull bool, cands []*candidate) (left int64, err error) {
+// MAX_ALERTS_PER_REPO open alerts of built-in rules, or, for a secret only refs/pull/* reach (which any reader can write),
+// when half of that many open alerts are of that kind: the branches and tags always have room. Custom patterns have
+// half as many of their own on top (customCap), so they never take a built-in rule's room, and their pull-only alerts
+// a quarter of that share.
+// byPoster, for text (nil for code), counts the open alerts of each poster (CountOpenTextAlertsByPoster): one poster
+// opens at most a quarter of the pull refs' share, so a reader posting tokens can't take all of it.
+func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID int64, kind string, viaPull bool, cands []*candidate, byPoster map[int64]int64) (left int64, err error) {
 	if len(cands) == 0 {
 		return 0, nil
 	}
-	total, pulls, err := secretscan_model.CountOpenAlerts(ctx, repoID)
+	n, err := secretscan_model.CountOpenAlertsByCap(ctx, repoID)
 	if err != nil {
 		return 0, err
 	}
-	pullCap := max(cfg.MaxAlertsPerRepo/2, 1)
+	// counts and caps of the built-in rules, and of the custom patterns
+	counts := func(custom bool) (total, pulls *int64, limit, pullLimit int64) {
+		if custom {
+			c := customCap(cfg.MaxAlertsPerRepo)
+			return &n.Custom, &n.CustomViaPull, c, max(c/4, 1)
+		}
+		return &n.Total, &n.ViaPull, cfg.MaxAlertsPerRepo, max(cfg.MaxAlertsPerRepo/2, 1)
+	}
+	posterCap := max(max(cfg.MaxAlertsPerRepo/2, 1)/4, 1)
 	for batch := range slices.Chunk(cands, alertBatch) {
 		fingerprints := make([]string, len(batch))
 		for i, c := range batch {
@@ -758,23 +786,33 @@ func writeAlerts(ctx context.Context, cfg setting.SecretScanningOptions, repoID 
 			a := byKey[c.ruleID+"|"+c.fingerprint]
 			switch {
 			case a == nil:
-				if total >= cfg.MaxAlertsPerRepo || viaPull && pulls >= pullCap {
+				rule, _ := secretdetection.RuleByID(c.ruleID)
+				_, custom := secretscan_model.ParseCustomRuleID(c.ruleID)
+				total, pulls, limit, pullLimit := counts(custom)
+				byThem := byPoster != nil && c.poster != 0
+				if *total >= limit || viaPull && *pulls >= pullLimit || byThem && byPoster[c.poster] >= posterCap {
 					left++
 					break
 				}
-				rule, _ := secretdetection.RuleByID(c.ruleID)
+				if byThem {
+					byPoster[c.poster]++
+				}
+				if custom {
+					rule.Type = "custom"
+				}
 				a = &secretscan_model.Alert{RepoID: repoID, RuleID: c.ruleID, SecretType: rule.Type, Fingerprint: c.fingerprint, ViaPull: viaPull}
 				if err := secretscan_model.InsertAlert(ctx, a); err != nil {
 					return 0, err
 				}
-				total++
+				*total++
 				if viaPull {
-					pulls++
+					*pulls++
 				}
 			case a.ViaPull && !viaPull:
 				reached = append(reached, a.ID) // a branch or tag reaches it too
 				if a.State == secretscan_model.StateOpen {
-					pulls--
+					_, pulls, _, _ := counts(a.SecretType == "custom")
+					*pulls--
 				}
 			}
 			alerts = append(alerts, a)

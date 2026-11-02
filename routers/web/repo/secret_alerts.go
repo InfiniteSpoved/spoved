@@ -16,7 +16,6 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/base"
-	"forgejo.org/modules/secretdetection"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
@@ -74,19 +73,12 @@ func mustWriteSecretAlerts(ctx *context.Context) bool {
 // secretAlertRow is an alert as the pages show it.
 type secretAlertRow struct {
 	*secretscan_model.Alert
-	Name     string
-	Generic  bool
-	First    *secretscan_model.Location
-	More     int // places beyond the first the viewer can see
-	ClosedBy *user_model.User
-}
-
-func secretRules() map[string]secretdetection.Rule {
-	rules := map[string]secretdetection.Rule{}
-	for _, r := range secretdetection.BuiltinRules() {
-		rules[r.ID] = r
-	}
-	return rules
+	Name      string
+	Generic   bool
+	First     *secretscan_model.Location
+	FirstText *secretscan_model.TextPlace // First, when it is in text
+	More      int                         // places beyond the first the viewer can see
+	ClosedBy  *user_model.User
 }
 
 func buildSecretRows(ctx *context.Context, alerts []*secretscan_model.Alert, canReadWiki bool) ([]*secretAlertRow, error) {
@@ -105,16 +97,34 @@ func buildSecretRows(ctx *context.Context, alerts []*secretscan_model.Alert, can
 	if err != nil {
 		return nil, err
 	}
+	firstLocs := make([]*secretscan_model.Location, 0, len(first))
+	for _, l := range first {
+		firstLocs = append(firstLocs, l)
+	}
+	access := secretTextAccess(ctx)
+	access.NoPosters = true // the list shows no poster
+	texts, err := secretscan_model.LoadTextPlaces(ctx, ctx.Repo.Repository.ID, firstLocs, access)
+	if err != nil {
+		return nil, err
+	}
 	users, err := user_model.GetUsersByIDsWithBots(ctx, userIDs)
 	if err != nil {
 		return nil, err
 	}
-	rules := secretRules()
+	ruleIDs := make([]string, len(alerts))
+	for i, a := range alerts {
+		ruleIDs[i] = a.RuleID
+	}
+	labels, err := secretscan_model.LoadRuleLabels(ctx, ruleIDs)
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]*secretAlertRow, 0, len(alerts))
 	for _, a := range alerts {
-		r := &secretAlertRow{Alert: a, Name: a.RuleID, First: first[a.ID], More: max(counts[a.ID]-1, 0)}
-		if rule, ok := rules[a.RuleID]; ok {
-			r.Name, r.Generic = rule.Name, rule.Type == "generic"
+		l := labels.Label(a.RuleID, ctx.Repo.Repository.OwnerID, nil) // the name of a deleted pattern is for its owners' lists
+		r := &secretAlertRow{Alert: a, Name: l.Text(ctx.Locale), Generic: l.Generic, First: first[a.ID], More: max(counts[a.ID]-1, 0)}
+		if r.First != nil {
+			r.FirstText = texts[r.First.ID]
 		}
 		if a.ClosedByID != 0 {
 			_, r.ClosedBy = user_model.GetUserFromMap(a.ClosedByID, users)
@@ -124,15 +134,22 @@ func buildSecretRows(ctx *context.Context, alerts []*secretscan_model.Alert, can
 	return rows, nil
 }
 
+// secretTextAccess is what the viewer may read of the repository's texts: a place in an issue, a pull request or a
+// comment is shown (with its number, link and poster) only to a viewer who reads that issue or pull request.
+func secretTextAccess(ctx *context.Context) secretscan_model.TextAccess {
+	return secretscan_model.TextAccess{Issues: ctx.Repo.CanRead(unit.TypeIssues), Pulls: ctx.Repo.CanRead(unit.TypePullRequests)}
+}
+
 // scanStatus is the status line of the list: the summary of the scan rows the viewer may see.
 func scanStatus(ctx *context.Context, canReadWiki bool) (*api.SecretScanningStatus, error) {
 	scans, err := secretscan_model.FindScans(ctx, ctx.Repo.Repository.ID)
 	if err != nil {
 		return nil, err
 	}
-	if !canReadWiki {
-		scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool { return s.Kind == secretscan_model.KindWiki })
-	}
+	canReadText := secretscan_service.TextStatusVisible(ctx, ctx.Repo.Repository, ctx.Repo.CanRead)
+	scans = slices.DeleteFunc(scans, func(s *secretscan_model.Scan) bool {
+		return s.Kind == secretscan_model.KindWiki && !canReadWiki || s.Kind == secretscan_model.KindIssue && !canReadText
+	})
 	return convert.ToSecretScanningStatus(scans), nil
 }
 
@@ -172,6 +189,17 @@ func SecretAlerts(ctx *context.Context) {
 	} else if t != "" {
 		ignored = true
 	}
+	foundKinds := map[string][]string{"code": {secretscan_model.KindRepo}, "pull": {secretscan_model.KindPull}, "text": secretscan_model.TextKinds}
+	foundOptions := []string{"code", "pull", "text"}
+	if canReadWiki {
+		foundKinds["wiki"], foundOptions = []string{secretscan_model.KindWiki}, []string{"code", "wiki", "pull", "text"}
+	}
+	found := ctx.FormString("found")
+	if kinds, ok := foundKinds[found]; ok {
+		opts.Kinds = kinds
+	} else if found != "" {
+		found, ignored = "", true
+	}
 	if q := ctx.FormTrim("q"); len(q) <= secretscan_model.MaxFilterLen*4 {
 		opts.PathQuery = q
 	} else {
@@ -197,13 +225,18 @@ func SecretAlerts(ctx *context.Context) {
 		ctx.ServerError("secretOffNotes", err)
 		return
 	}
-	rules := secretRules()
+	labels, err := secretscan_model.LoadRuleLabels(ctx, ruleIDs)
+	if err != nil {
+		ctx.ServerError("LoadRuleLabels", err)
+		return
+	}
 	type ruleOption struct{ ID, Name string }
 	var types []ruleOption
 	for _, id := range ruleIDs {
-		name := id
-		if r, ok := rules[id]; ok {
-			name = r.Name
+		l := labels.Label(id, repo.OwnerID, nil)
+		name := l.Text(ctx.Locale)
+		if l.Name == "" { // a pattern without a name to show: the rule ID tells such options apart
+			name += " (" + id + ")"
 		}
 		types = append(types, ruleOption{id, name})
 	}
@@ -211,7 +244,8 @@ func SecretAlerts(ctx *context.Context) {
 	ctx.Data["Alerts"], ctx.Data["Total"] = rows, total
 	ctx.Data["State"], ctx.Data["Closed"] = ctx.FormString("state"), state == "resolved"
 	ctx.Data["Query"], ctx.Data["Type"], ctx.Data["Reason"], ctx.Data["Sort"] = opts.PathQuery, typ, reason, sort
-	ctx.Data["HasFilter"] = opts.PathQuery != "" || typ != "" || reason != ""
+	ctx.Data["Found"], ctx.Data["FoundOptions"] = found, foundOptions
+	ctx.Data["HasFilter"] = opts.PathQuery != "" || typ != "" || reason != "" || found != ""
 	ctx.Data["TypeOptions"], ctx.Data["ClosedStates"] = types, secretscan_model.ClosedStates
 	ctx.Data["ScanStatus"] = status
 	if status.LastScanned != nil {
@@ -220,7 +254,7 @@ func SecretAlerts(ctx *context.Context) {
 	ctx.Data["TotalSecretAlerts"] = ctx.Data["SecretOpenCount"].(int64) + ctx.Data["SecretClosedCount"].(int64)
 	ctx.Data["MaxCommentLen"] = secretscan_model.MaxCommentLen
 	pager := context.NewPagination(int(total), secretPageSize, opts.Page, 5)
-	for k, v := range map[string]string{"state": ctx.FormString("state"), "q": opts.PathQuery, "type": typ, "reason": reason, "sort": sort} {
+	for k, v := range map[string]string{"state": ctx.FormString("state"), "q": opts.PathQuery, "type": typ, "found": found, "reason": reason, "sort": sort} {
 		if v != "" {
 			pager.AddParamString(k, v)
 		}
@@ -373,7 +407,33 @@ func SecretAlert(ctx *context.Context) {
 	ctx.Data["Title"] = row.Name
 	ctx.Data["Alert"] = row
 	ctx.Data["ShortFingerprint"] = alert.Fingerprint[:min(12, len(alert.Fingerprint))]
-	ctx.Data["Locations"] = convert.ToSecretScanningLocations(repo, locs, func(path string) string { return wiki_service.PageHTMLURL(repo, path) })
+	texts, err := secretscan_model.LoadTextPlaces(ctx, repo.ID, locs, secretTextAccess(ctx))
+	if err != nil {
+		ctx.ServerError("LoadTextPlaces", err)
+		return
+	}
+	kinds, err := secretscan_model.LocationKinds(ctx, repo.ID, alert.ID)
+	if err != nil {
+		ctx.ServerError("LocationKinds", err)
+		return
+	}
+	hasText := slices.ContainsFunc(kinds, func(k string) bool { return slices.Contains(secretscan_model.TextKinds, k) })
+	onlyText := hasText && !slices.ContainsFunc(kinds, func(k string) bool { return !slices.Contains(secretscan_model.TextKinds, k) })
+	ctx.Data["TextOnly"], ctx.Data["TextAlso"] = onlyText, hasText && !onlyText
+	for _, p := range texts {
+		if !p.Readable && !p.Deleted {
+			ctx.Data["AnyHidden"] = true // a place the viewer is not told about
+		}
+	}
+	posters := make([]*user_model.User, len(locs)) // the poster of each place, for the profile link
+	for i, l := range locs {
+		if p := texts[l.ID]; p != nil && p.Readable {
+			posters[i] = p.Poster
+		}
+	}
+	ctx.Data["Posters"] = posters
+	ctx.Data["RedactedMark"] = secretscan_service.RedactedMark
+	ctx.Data["Locations"] = convert.ToSecretScanningLocations(repo, locs, texts, func(path string) string { return wiki_service.PageHTMLURL(repo, path) })
 	titles := map[string]string{}
 	for _, l := range locs {
 		if l.Kind == secretscan_model.KindWiki {
@@ -471,6 +531,46 @@ func SecretAlertReopen(ctx *context.Context) {
 		}
 	} else {
 		ctx.Flash.Success(ctx.Tr("repo.secrets.alert.reopened_done"))
+	}
+	ctx.Redirect(secretAlertLink(ctx))
+}
+
+// SecretAlertRedact removes the secret of the alert from one text of an issue or pull request (see
+// secretscan_service.RedactText): someone who may close the alert, and reads that text.
+func SecretAlertRedact(ctx *context.Context) {
+	if !mustWriteSecretAlerts(ctx) || loadSecretAlertForPage(ctx) == nil {
+		return
+	}
+	target := secretscan_service.RedactTarget{Issue: ctx.FormInt64("issue"), Field: ctx.FormString("field"), Comment: ctx.FormInt64("comment")}
+	res, err := secretscan_service.RedactText(ctx, ctx.Repo.Repository, ctx.Doer, ctx.ParamsInt64(":index"), target, secretTextAccess(ctx), ctx.Repo.CanRead(unit.TypeWiki))
+	title := target.Field == "title"
+	switch {
+	case err == nil && res.Replaced > 0 && title:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.done_title", secretscan_service.RedactedMark))
+	case err == nil && res.Replaced > 0:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.done", secretscan_service.RedactedMark))
+	case err == nil && res.Cleaned && title:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.history_only_title"))
+	case err == nil && res.Cleaned:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.history_only"))
+	case err == nil:
+		ctx.Flash.Success(ctx.Tr("repo.secrets.redact.marked_removed"))
+	case errors.Is(err, secretscan_service.ErrRedactTarget):
+		ctx.NotFound("SecretAlertRedact", err)
+		return
+	case errors.Is(err, secretscan_service.ErrRedactGone):
+		ctx.Flash.Info(ctx.Tr("repo.secrets.redact.gone"))
+	case errors.Is(err, secretscan_service.ErrRedactManual):
+		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.manual"))
+	case errors.Is(err, secretscan_service.ErrRedactPattern):
+		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.pattern"))
+	case errors.Is(err, secretscan_service.ErrRedactChanged):
+		ctx.Flash.Error(ctx.Tr("repo.secrets.redact.changed"))
+	case errors.Is(err, util.ErrInvalidArgument): // none other is expected: never the close form's message
+		ctx.ServerError("SecretAlertRedact", err)
+		return
+	case secretAlertError(ctx, err) && ctx.Written():
+		return
 	}
 	ctx.Redirect(secretAlertLink(ctx))
 }

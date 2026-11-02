@@ -45,7 +45,8 @@ func TestCustomRuleShapes(t *testing.T) {
 	acme := "acme_[A-Za-z0-9]{30}"
 	test := "acme_" + fake(30, alnum)
 	require.NoError(t, ValidateCustomRule("r", acme, test, []string{"acme_"}))
-	require.ErrorIs(t, ValidateCustomRule("r", acme, test, []string{"acme_", "the"}), ErrKeywordMissing, "every keyword must be in the match")
+	require.ErrorIs(t, ValidateCustomRule("r", acme, test, []string{"acme_", "zork"}), ErrKeywordMissing, "every keyword must be in the match")
+	require.ErrorIs(t, ValidateCustomRule("r", acme, test, []string{"acme_", "the"}), ErrKeywordTooCommon, "a keyword all over ordinary files")
 	require.ErrorIs(t, ValidateCustomRule("r", acme, test, []string{"acme_", "acm", "cme", "me_", "e_" + "a", "_ab"}), ErrKeywordMissing, "more than five")
 	require.ErrorIs(t, ValidateCustomRule("r", acme, test, []string{strings.Repeat("a", 65)}), ErrKeywordMissing)
 	require.NoError(t, ValidateCustomRule("r", acme, test, []string{"acme_", "acm", "cme", "me_", "e_" + test[5:6]}))

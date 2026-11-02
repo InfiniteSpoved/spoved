@@ -8,12 +8,15 @@ import (
 	"encoding/csv"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	audit_model "forgejo.org/models/audit"
+	repo_model "forgejo.org/models/repo"
+	secretscan_model "forgejo.org/models/secretscan"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
@@ -22,6 +25,7 @@ import (
 	"forgejo.org/services/context"
 	"forgejo.org/services/convert"
 	dependency_service "forgejo.org/services/dependency"
+	secretscan_service "forgejo.org/services/secretscan"
 	vulnerability_service "forgejo.org/services/vulnerability"
 )
 
@@ -79,6 +83,10 @@ var exportSlots = make(chan struct{}, 2)
 // ExportTimeLimit is how long one export may run; it is checked between batches (a variable for tests).
 var ExportTimeLimit = 10 * time.Minute
 
+// ExportStallTime is how long the writes of one batch of an export may wait for a client that stops reading;
+// the window starts again with each batch, so a slow but reading client is only bound by ExportTimeLimit.
+var ExportStallTime = time.Minute
+
 var (
 	exportingMu sync.Mutex
 	exporting   = map[int64]bool{} // the doers with an export running: one each
@@ -121,7 +129,7 @@ type exportRow struct {
 }
 
 // recordExport writes the audit entry of an export (fail closed, before the first byte): the kind, the format, the
-// filters given and the row count, never a repository name.
+// filters given (for secret alerts the repository search text too, as typed) and the row count.
 func recordExport(ctx *context.Base, doer *user_model.User, scope dependency_service.SearchScope, kind, format string, filters map[string]string, count int64) error {
 	data := map[string]any{"kind": kind, "format": format, "count": count}
 	for k, v := range filters {
@@ -132,8 +140,14 @@ func recordExport(ctx *context.Base, doer *user_model.User, scope dependency_ser
 	e := audit_model.Event{
 		Action: "admin.dependency_graph.exported", Result: audit_model.ResultSuccess, TargetType: "dependency_export", Data: data,
 	}
+	if kind == "secrets" {
+		e.Action, e.TargetType = "admin.secret_alerts.exported", "secret_export"
+	}
 	if scope.Org != nil {
 		e.Action, e.OwnerID, e.TargetID, e.TargetName = "org.dependency_graph.exported", scope.Org.ID, scope.Org.ID, scope.Org.Name
+		if kind == "secrets" {
+			e.Action = "org.secret_alerts.exported"
+		}
 	} else {
 		e.OwnerID, e.TargetID, e.TargetName = doer.ID, doer.ID, doer.Name
 	}
@@ -154,6 +168,26 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 	}
 	defer release()
 	deadline := time.Now().Add(ExportTimeLimit)
+	// A client that stops reading would block a write, and hold the slot, past the time limit: each batch may wait
+	// ExportStallTime for the client, never past the time limit.
+	rc, hasDeadline := http.NewResponseController(ctx.Resp), true
+	stallDeadline := func() {
+		if !hasDeadline {
+			return
+		}
+		until := time.Now().Add(ExportStallTime)
+		if until.After(deadline) {
+			until = deadline
+		}
+		if err := rc.SetWriteDeadline(until); err != nil {
+			hasDeadline = false
+			log.Warn("serveExport: the writes of the export have no deadline: %v", err)
+		}
+	}
+	stallDeadline()
+	if hasDeadline {
+		defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	}
 	batches := 0
 	sep := "["
 	cw, enc := csv.NewWriter(ctx.Resp), json.NewEncoder(ctx.Resp)
@@ -162,8 +196,11 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 			return err
 		}
 		name, owner, contentType := "dependencies", "instance", "text/csv"
-		if kind == "alerts" {
+		switch kind {
+		case "alerts":
 			name = "vulnerability-alerts"
+		case "secrets":
+			name = "secret-alerts"
 		}
 		if scope.Org != nil {
 			owner = scope.Org.Name
@@ -184,6 +221,7 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 		if batches++; batches > 1 && time.Now().After(deadline) { // before the next batch is written, never after the last
 			return ErrExportTimeLimit
 		}
+		stallDeadline()
 		for n, r := range rows {
 			if n%100 == 99 && time.Now().After(deadline) {
 				return ErrExportTimeLimit
@@ -236,7 +274,8 @@ func serveExport(ctx *context.Base, doer *user_model.User, scope dependency_serv
 		}
 		return err
 	default:
-		if errors.Is(err, stdctx.Canceled) || errors.Is(err, ErrExportTimeLimit) {
+		// a client that stops reading ends at the write deadline: os.ErrDeadlineExceeded
+		if errors.Is(err, stdctx.Canceled) || errors.Is(err, ErrExportTimeLimit) || errors.Is(err, os.ErrDeadlineExceeded) {
 			log.Info("serveExport: %v", err)
 		} else {
 			log.Error("serveExport: %v", err)
@@ -279,6 +318,44 @@ func ExportAlerts(ctx *context.Base, doer *user_model.User, scope dependency_ser
 					out[i] = exportRow{obj: a, cells: []string{
 						a.Repository.FullName, a.Advisory.ID, strings.Join(a.Advisory.Aliases, " "), a.Severity, a.Ecosystem, a.Package, a.Version,
 						strings.Join(a.FixedVersions, " "), a.ManifestPath, a.State,
+					}}
+				}
+				return emit(out)
+			})
+		})
+}
+
+// ExportSecretAlerts sends every alert of a secret alert list as a CSV download, as ExportAlerts does. The columns are
+// those the page lists, with no secret or fingerprint (the scanner stores neither); the comment is the closer's own
+// text, CSV-safe as every cell.
+func ExportSecretAlerts(ctx *context.Base, doer *user_model.User, scope secretscan_service.Scope, f secretscan_service.Filter, absoluteURL func(*secretscan_model.Alert, *repo_model.Repository) string) error {
+	filters := map[string]string{"state": f.State, "reason": f.Reason, "type": f.Type, "owner": scope.Owner, "project": scope.Project, "q": scope.Query}
+	return serveExport(ctx, doer, dependency_service.SearchScope{Org: scope.Org}, "secrets", "csv", filters,
+		[]string{"state", "reason", "closed_by", "closed_at", "comment", "first_seen", "repository", "type", "location", "alert_url"},
+		func(start func(int64) error, emit func([]exportRow) error) error {
+			return secretscan_service.Export(ctx, scope, f, start, func(hits []*secretscan_service.Hit) error {
+				out := make([]exportRow, len(hits))
+				for i, h := range hits {
+					state, reason, closedBy, closedAt := h.State, h.Reason, "", ""
+					if h.State != secretscan_model.StateOpen {
+						state = "closed"
+						if h.ClosedBy != nil {
+							closedBy = h.ClosedBy.Name
+						}
+						closedAt = h.ClosedUnix.AsTime().UTC().Format(time.RFC3339)
+					}
+					location := ""
+					if h.First != nil && h.First.IsText() { // a fixed token: lists across repositories never name an issue
+						location = "text:" + h.First.Kind
+					} else if h.First != nil {
+						location = h.First.Path
+						if h.First.StartLine > 0 {
+							location += ":" + strconv.Itoa(h.First.StartLine)
+						}
+					}
+					out[i] = exportRow{cells: []string{
+						state, reason, closedBy, closedAt, h.Comment, h.CreatedUnix.AsTime().UTC().Format(time.RFC3339),
+						h.Repo.FullName(), h.Text(ctx.Locale), location, absoluteURL(h.Alert, h.Repo),
 					}}
 				}
 				return emit(out)

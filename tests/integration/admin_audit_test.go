@@ -239,6 +239,8 @@ func TestAdminAuditAccess(t *testing.T) {
 func TestAdminAuditRoutes(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	enableDependencyGraph(t) // the search pages answer 404 while it is off
+	// so does the secret alert list
+	t.Cleanup(test.MockVariableValue(&setting.SecretScanning.Enabled, true))
 	setUserFlag(t, 2, "is_auditor", true)
 	auditor := loginUser(t, "user2")
 
@@ -259,6 +261,10 @@ func TestAdminAuditRoutes(t *testing.T) {
 		switch {
 		case method == "GET" && (route == "/admin/audit" || route == "/admin/config/secret-scanning" || strings.HasPrefix(route, "/admin/config/dependency-graph")):
 			assert.Equal(t, http.StatusOK, resp.Code, route)
+		case method == "GET" && (route == "/admin/security/secrets" || route == "/admin/security/patterns"):
+			assert.Equal(t, http.StatusOK, resp.Code, route)
+		case method == "POST" && route == "/admin/security/secrets/export":
+			assert.Equal(t, http.StatusOK, resp.Code, method+" "+route) // the audited download of the list: a CSV
 		case method == "POST" && strings.HasPrefix(route, "/admin/config/dependency-graph/") && strings.HasSuffix(route, "/export"):
 			// the audited download of the dependency and vulnerability search is open to the auditor: it gets past the
 			// gate and is sent back to the page: the form names no format

@@ -49,8 +49,8 @@
 				{{svg "octicon-graph"}} {{ctx.Locale.Tr "metrics.title"}}
 			</a>
 			{{end}}
-			{{if .EnableSecurity}}
-			<a class="{{if $.PageIsOrgSecurity}}active {{end}}item" href="{{$.OrgLink}}/security">
+			{{if or .EnableSecurity .EnableSecretAlerts}}
+			<a class="{{if $.PageIsOrgSecurity}}active {{end}}item" href="{{$.OrgLink}}/security{{if not .EnableSecurity}}/secrets{{end}}">
 				{{svg "octicon-shield"}} {{ctx.Locale.Tr "security_search.title"}}
 			</a>
 			{{end}}

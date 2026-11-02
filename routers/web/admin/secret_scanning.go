@@ -31,7 +31,7 @@ type secretScanningLimitRow struct {
 }
 
 // secretScanningFormUnits is the unit of a size limit in the form (MiB); a time is in seconds and the rest are counts.
-var secretScanningFormUnits = map[string]int64{"max_blob_size": 1 << 20, "max_scan_bytes": 1 << 20}
+var secretScanningFormUnits = map[string]int64{"max_blob_size": 1 << 20, "max_scan_bytes": 1 << 20, "max_text_bytes": 1 << 10}
 
 // secretScanningLimitText is a limit in its form unit, exactly (0.5 for half a MiB).
 func secretScanningLimitText(name string, v int64) string {
@@ -128,6 +128,8 @@ func secretScanningLimitLabel(ctx *context.Context, name string) string {
 		return ctx.Locale.TrString("admin.secret_scanning.limit.max_alerts_per_repo")
 	case "max_locations_per_alert":
 		return ctx.Locale.TrString("admin.secret_scanning.limit.max_locations_per_alert")
+	case "max_text_bytes":
+		return ctx.Locale.TrString("admin.secret_scanning.limit.max_text_bytes")
 	}
 	return name
 }
@@ -144,6 +146,8 @@ func secretScanningLimitUnit(ctx *context.Context, name string) string {
 		return ctx.Locale.TrString("admin.secret_scanning.unit.alerts")
 	case "max_locations_per_alert":
 		return ctx.Locale.TrString("admin.secret_scanning.unit.places")
+	case "max_text_bytes":
+		return ctx.Locale.TrString("admin.secret_scanning.unit.kib")
 	}
 	return ""
 }
@@ -163,8 +167,8 @@ func renderSecretScanning(ctx *context.Context, posted map[string]string, refuse
 	stored := setting.Config().SecretScanningConfig.Value(ctx)
 	cfg := stored.Merge()
 	ctx.Data["Enabled"] = state.Enabled()
-	ctx.Data["Generic"] = cfg.GenericRules
-	ctx.Data["FileEnabled"], ctx.Data["FileGeneric"] = setting.SecretScanning.Enabled, setting.SecretScanning.GenericRules
+	ctx.Data["Generic"], ctx.Data["ScanText"] = cfg.GenericRules, cfg.ScanText
+	ctx.Data["FileEnabled"], ctx.Data["FileGeneric"], ctx.Data["FileScanText"] = setting.SecretScanning.Enabled, setting.SecretScanning.GenericRules, setting.SecretScanning.ScanText
 	by, at := state.UpdatedBy, state.UpdatedUnix // the later of the two saves
 	if stored.UpdatedUnix > at {
 		by, at = stored.UpdatedBy, stored.UpdatedUnix
@@ -202,9 +206,13 @@ func renderSecretScanning(ctx *context.Context, posted map[string]string, refuse
 	ctx.HTML(status, tplSecretScanning)
 }
 
-// SecretScanningSwitchesPost saves the site switch and the generic rule. It never touches the limits.
+// SecretScanningSwitchesPost saves the site switch, the generic rule and the text scan. It never touches the limits.
 func SecretScanningSwitchesPost(ctx *context.Context) {
-	changed, err := secretscan_service.SaveSwitches(ctx, ctx.Doer, ctx.FormBool("enabled"), ctx.FormBool("generic"))
+	scanText := setting.SecretScanningSettings(ctx).ScanText
+	if ctx.FormBool("scan_text_shown") { // a post without the field keeps the setting
+		scanText = ctx.FormBool("scan_text")
+	}
+	changed, err := secretscan_service.SaveSwitches(ctx, ctx.Doer, ctx.FormBool("enabled"), ctx.FormBool("generic"), scanText)
 	if err != nil {
 		ctx.ServerError("SaveSwitches", err)
 		return

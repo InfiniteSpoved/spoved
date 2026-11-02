@@ -45,7 +45,8 @@ func GetAlert(ctx context.Context, repoID, index int64) (*Alert, error) {
 	return a, nil
 }
 
-// GetVisibleAlert is GetAlert for a viewer: without Wiki read, an alert that is only in the wiki is not there.
+// GetVisibleAlert is GetAlert for a viewer: without Wiki read, an alert that is only in the wiki is not there (the
+// rule of AlertSearchOptions.CodeOnly, so every alert a list shows can be opened).
 func GetVisibleAlert(ctx context.Context, repoID, index int64, canReadWiki bool) (*Alert, error) {
 	alert, err := GetAlert(ctx, repoID, index)
 	if err != nil || canReadWiki {
@@ -70,6 +71,12 @@ func likeContains(key, value string) builder.Cond {
 	return builder.Expr("UPPER("+key+") LIKE ? ESCAPE '!'", "%"+value+"%")
 }
 
+// RepoSearchCond matches, on the repository table, the repositories whose name or owner name holds q (a part of a
+// name, case-insensitive; % and _ are taken literally).
+func RepoSearchCond(q string) builder.Cond {
+	return builder.Or(likeContains("`repository`.name", q), likeContains("`repository`.owner_name", q))
+}
+
 // HasAlerts tells whether the repository has an alert the viewer can see (one query, stops at the first row).
 func HasAlerts(ctx context.Context, repoID int64, codeOnly bool) (bool, error) {
 	opts := &AlertSearchOptions{RepoID: repoID, CodeOnly: codeOnly}
@@ -79,19 +86,25 @@ func HasAlerts(ctx context.Context, repoID int64, codeOnly bool) (bool, error) {
 // AlertSearchOptions selects the alerts of one repository, newest first.
 type AlertSearchOptions struct {
 	db.ListOptions
-	RepoID      int64
+	RepoID int64
+	// RepoCond, if set, replaces RepoID: the alerts of the repositories that match it (a condition on the repository
+	// table), for the lists across repositories.
+	RepoCond    builder.Cond
 	State       string   // open or resolved
 	Resolutions []string // closed states
 	SecretTypes []string // rule IDs
 	Sort        string   // created (the default) or updated
 	Ascending   bool
 	CodeOnly    bool     // only alerts that have a place outside the wiki
-	Kinds       []string // only alerts that have a place of one of these kinds (KindRepo, KindWiki, KindPull)
-	PathQuery   string   // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly)
+	Kinds       []string // only alerts that have a place of one of these kinds (KindRepo, KindWiki, KindPull, KindIssue, KindComment)
+	PathQuery   string   // only alerts with a place whose path holds this text (the wiki's places only without CodeOnly, never the text's)
 }
 
 func (o *AlertSearchOptions) ToConds() builder.Cond {
 	cond := builder.NewCond().And(builder.Eq{"repo_id": o.RepoID})
+	if o.RepoCond != nil {
+		cond = builder.In("repo_id", builder.Select("`repository`.id").From("repository").Where(o.RepoCond))
+	}
 	switch o.State {
 	case StateOpen:
 		cond = cond.And(builder.Eq{"state": StateOpen})
@@ -117,6 +130,7 @@ func (o *AlertSearchOptions) ToConds() builder.Cond {
 		if o.CodeOnly {
 			in = in.And(builder.Neq{"secret_scanning_location.kind": KindWiki})
 		}
+		in = in.And(builder.NotIn("secret_scanning_location.kind", TextKinds)) // a text place's path is only its field name
 		cond = cond.And(builder.Exists(builder.Select("1").From("secret_scanning_location").Where(in)))
 	}
 	return cond
@@ -171,11 +185,7 @@ type LocationSearchOptions struct {
 }
 
 func (o *LocationSearchOptions) ToConds() builder.Cond {
-	cond := builder.NewCond().And(builder.Eq{"repo_id": o.RepoID, "alert_id": o.AlertID})
-	if o.NoWiki {
-		cond = cond.And(builder.Neq{"kind": KindWiki})
-	}
-	return cond
+	return builder.NewCond().And(builder.Eq{"repo_id": o.RepoID, "alert_id": o.AlertID}, readableKinds(o.NoWiki))
 }
 
 func (o *LocationSearchOptions) ToOrders() string { return "id" }
@@ -193,21 +203,29 @@ func AnyFingerprint(ctx context.Context, repoID int64, fingerprints []string, co
 	return false, nil
 }
 
-// HasCodeLocation tells whether the alert has a stored place outside the wiki.
+// HasCodeLocation tells whether the alert has a stored place outside the wiki, the rule of AlertSearchOptions.CodeOnly
+// (a place in text counts: such an alert is listed, so it can be opened and closed; the place itself is not shown).
 func HasCodeLocation(ctx context.Context, repoID, alertID int64) (bool, error) {
 	return db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "alert_id": alertID}.And(builder.Neq{"kind": KindWiki})).Exist(new(Location))
 }
 
+// LocationKinds returns the kinds of places the alert has (each once), in one query.
+func LocationKinds(ctx context.Context, repoID, alertID int64) (kinds []string, err error) {
+	return kinds, db.GetEngine(ctx).Table("secret_scanning_location").Distinct("kind").Where(builder.Eq{"repo_id": repoID, "alert_id": alertID}).Find(&kinds)
+}
+
 // CountLocations counts the stored places of the alerts in one query, without those in the wiki when noWiki is set.
+// A repoID of 0 means the alerts may be of any repository (their IDs are unique).
 func CountLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki bool) (map[int64]int, error) {
 	var rows []struct {
 		AlertID int64
 		N       int
 	}
-	cond := builder.Eq{"repo_id": repoID}.And(builder.In("alert_id", alertIDs))
-	if noWiki {
-		cond = cond.And(builder.Neq{"kind": KindWiki})
+	cond := builder.In("alert_id", alertIDs)
+	if repoID != 0 {
+		cond = cond.And(builder.Eq{"repo_id": repoID})
 	}
+	cond = cond.And(readableKinds(noWiki))
 	err := db.GetEngine(ctx).Table("secret_scanning_location").Select("alert_id, COUNT(*) AS n").Where(cond).GroupBy("alert_id").Find(&rows)
 	out := make(map[int64]int, len(rows))
 	for _, r := range rows {
@@ -219,7 +237,7 @@ func CountLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki 
 // FindLocations returns up to limit places of an alert in the order they were found.
 func FindLocations(ctx context.Context, repoID, alertID int64, limit int) ([]*Location, error) {
 	var locs []*Location
-	return locs, db.GetEngine(ctx).Where("repo_id = ? AND alert_id = ?", repoID, alertID).OrderBy("id").Limit(limit).Find(&locs)
+	return locs, db.GetEngine(ctx).Where(builder.Eq{"repo_id": repoID, "alert_id": alertID}.And(readableKinds(false))).OrderBy("id").Limit(limit).Find(&locs)
 }
 
 // CloseAlert closes an open alert as state with the comment; the UPDATE is conditional on the alert being open, so
@@ -289,16 +307,17 @@ func FindRuleIDs(ctx context.Context, repoID int64, codeOnly bool) (ids []string
 }
 
 // FirstLocations returns the first stored place of each alert, in one query; with noWiki, a place in the wiki isn't
-// one.
+// one. A repoID of 0 means the alerts may be of any repository.
 func FirstLocations(ctx context.Context, repoID int64, alertIDs []int64, noWiki bool) (map[int64]*Location, error) {
 	out := make(map[int64]*Location, len(alertIDs))
 	if len(alertIDs) == 0 {
 		return out, nil
 	}
-	cond := builder.Eq{"repo_id": repoID}.And(builder.In("alert_id", alertIDs))
-	if noWiki {
-		cond = cond.And(builder.Neq{"kind": KindWiki})
+	cond := builder.In("alert_id", alertIDs)
+	if repoID != 0 {
+		cond = cond.And(builder.Eq{"repo_id": repoID})
 	}
+	cond = cond.And(readableKinds(noWiki))
 	first := builder.Select("MIN(id)").From("secret_scanning_location").Where(cond).GroupBy("alert_id")
 	var locs []*Location
 	if err := db.GetEngine(ctx).Where(builder.In("id", first)).Find(&locs); err != nil {

@@ -10,6 +10,7 @@ import (
 	"runtime/trace"
 	"slices"
 	"strings"
+	"time"
 
 	"forgejo.org/modules/cache"
 	"forgejo.org/modules/httplib"
@@ -173,7 +174,42 @@ func stripSlashesMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// sessionWriter is the session's response writer, which has no Unwrap: it passes a write deadline
+// (http.ResponseController) to the writer underneath, so a handler can bound its writes.
+type sessionWriter struct {
+	http.ResponseWriter
+	under http.ResponseWriter
+}
+
+func (w sessionWriter) SetWriteDeadline(t time.Time) error {
+	return http.NewResponseController(w.under).SetWriteDeadline(t)
+}
+
+// Flush sends the header through the session's writer first (it drops the cookie of an empty session), then
+// flushes the writer underneath. No Unwrap to under: it would skip that header handling.
+func (w sessionWriter) Flush() {
+	w.WriteHeader(http.StatusOK) // the session writer: a no-op once the header is written
+	if f, ok := w.under.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func Sessioner() func(next http.Handler) http.Handler {
+	sessioner := sessionMiddleware()
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			sessioner(http.HandlerFunc(func(sw http.ResponseWriter, req *http.Request) {
+				if sw == w { // an event stream: the session package passes the writer through as it is
+					next.ServeHTTP(w, req)
+					return
+				}
+				next.ServeHTTP(sessionWriter{ResponseWriter: sw, under: w}, req)
+			})).ServeHTTP(w, req)
+		})
+	}
+}
+
+func sessionMiddleware() func(next http.Handler) http.Handler {
 	return session.Sessioner(session.Options{
 		Provider:       setting.SessionConfig.Provider,
 		ProviderConfig: setting.SessionConfig.ProviderConfig,

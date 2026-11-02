@@ -345,7 +345,7 @@ func later(t *testing.T, d time.Duration) {
 // openAlerts counts the open alerts of the repository.
 func openAlerts(t *testing.T, repoID int64) (total, viaPull int64) {
 	t.Helper()
-	total, viaPull, err := secretscan_model.CountOpenAlerts(t.Context(), repoID)
+	total, viaPull, _, err := secretscan_model.CountOpenAlerts(t.Context(), repoID)
 	require.NoError(t, err)
 	return total, viaPull
 }
@@ -379,6 +379,13 @@ func TestScanBudgets(t *testing.T) {
 		assert.EqualValues(t, len(token("small"))+1, s.Bytes, "the big file's bytes were not read")
 		assert.NotNil(t, alertFor(t, repo.ID, token("small")))
 		assert.Nil(t, alertFor(t, repo.ID, token("big")))
+
+		w.commit(map[string]string{"next.txt": "nothing\n"})
+		w.pushDefault()
+		require.NoError(t, Scan(t.Context(), repo.ID))
+		s = scanOf(t, repo.ID, secretscan_model.KindRepo)
+		assert.EqualValues(t, 1, s.Blobs, "the next scan read one file")
+		assert.EqualValues(t, 1, s.SkippedLarge, "and the large file is still counted: it was never read")
 	})
 
 	// a commit that alone is over a limit is scanned as far as it fits, the rest is a hole, and the scan goes on
@@ -1090,7 +1097,17 @@ func TestScanPullRefsAreTheirOwnScan(t *testing.T) {
 	assert.NotContains(t, repoRow.ScannedTips, pullTips[0], "and the other row doesn't hold the pull tips")
 	assert.True(t, alertFor(t, repo.ID, pull).ViaPull)
 	assert.False(t, alertFor(t, repo.ID, def).ViaPull)
-	assert.Equal(t, secretscan_model.KindRepo, locationsOf(t, alertFor(t, repo.ID, pull).ID)[0].Kind)
+	assert.Equal(t, secretscan_model.KindPull, locationsOf(t, alertFor(t, repo.ID, pull).ID)[0].Kind, "the place says a pull ref reaches it")
+
+	// merged: a branch reaches the place too, and it is listed once per kind
+	w.git("checkout", "-q", "pr")
+	w.push("refs/heads/pr")
+	require.NoError(t, Scan(t.Context(), repo.ID))
+	locs := locationsOf(t, alertFor(t, repo.ID, pull).ID)
+	require.Len(t, locs, 2)
+	assert.ElementsMatch(t, []string{secretscan_model.KindPull, secretscan_model.KindRepo}, []string{locs[0].Kind, locs[1].Kind})
+	assert.Equal(t, locs[0].Path, locs[1].Path)
+	assert.False(t, alertFor(t, repo.ID, pull).ViaPull)
 }
 
 func TestScanContinuesWithinATip(t *testing.T) {

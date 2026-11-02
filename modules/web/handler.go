@@ -43,6 +43,12 @@ func (r *responseWriter) Write(bytes []byte) (int, error) {
 	return r.respWriter.Write(bytes)
 }
 
+// Unwrap gives http.ResponseController the writer underneath (a write deadline, for example). Never call
+// ResponseController.Flush through it: that writes the header below this writer, which then misses the status.
+func (r *responseWriter) Unwrap() http.ResponseWriter {
+	return r.respWriter
+}
+
 func (r *responseWriter) WriteHeader(statusCode int) {
 	r.status = statusCode
 	r.respWriter.WriteHeader(statusCode)

@@ -33,8 +33,13 @@ type Rule struct {
 	SecretGroup int
 
 	// MinEntropy is the minimum Shannon entropy (bits per byte) of the
-	// secret; 0 = no check.
+	// secret; 0 = no check. Outside the generic rules, a non-zero value also
+	// refuses a run of 10 ascending bytes (a placeholder such as 0123456789).
 	MinEntropy float64
+
+	// ReportAs, if set, is the rule ID its findings carry: a form of another
+	// rule's secret (a JWT in base64) is then one alert with it.
+	ReportAs string
 
 	// Allowlist regexes are matched against the secret; a hit drops the
 	// finding (placeholders like EXAMPLE, xxxx, ${VAR}, <token>).
@@ -108,6 +113,8 @@ type compiledRule struct {
 	cost      int // work units per byte the regex is given, see Detector.MaxWork
 	allowlist []*regexp.Regexp
 	tokenSet  *[256]bool
+	// keywordIDs are the rule's keywords in its Detector's keywordGate.
+	keywordIDs []int
 }
 
 func compileRule(r Rule) (*compiledRule, error) {

@@ -23717,6 +23717,73 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/secret-scanning/alerts/{index}/redact": {
+      "post": {
+        "description": "For people who may resolve the alert and read the issue or pull request (a token with scopes also needs write:issue). The secret is found again in the text as it is now and every copy of it is replaced with \"[secret removed]\"; the versions in the text's edit history are emptied (for a title, the secret is removed from the title changes of the timeline), the alert's places in the text are marked removed and the change is audited. When the secret is already gone from the text, only the history versions that hold it are emptied and the rest is done (204 too). Nobody is notified. It can't be undone, and the secret must still be revoked. A text the alert has no place in, or that the caller can't read, is 404; a text the detector can't read whole, an alert whose pattern is no longer used and a text with nothing left to remove are 422, a text that changed while it was redacted 409.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Remove the secret of an alert from the text of an issue, pull request or comment",
+        "operationId": "repoRedactSecretScanningText",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "number of the alert",
+            "name": "index",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/RedactSecretScanningTextOption"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/empty"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/conflict"
+          },
+          "422": {
+            "$ref": "#/responses/validationError"
+          },
+          "423": {
+            "$ref": "#/responses/repoArchivedError"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/secret-scanning/status": {
       "get": {
         "description": "One summary for the code, the wiki and the pull refs. Visible to the same people as the alerts.",
@@ -41062,6 +41129,30 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
+    "RedactSecretScanningTextOption": {
+      "description": "RedactSecretScanningTextOption names the text to remove the secret of an alert from: the title or body of an issue\nor pull request (issue_number and field), or a comment (comment_id).",
+      "type": "object",
+      "properties": {
+        "comment_id": {
+          "description": "the ID of the comment",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "CommentID"
+        },
+        "field": {
+          "description": "title or body; comment (or empty) with comment_id",
+          "type": "string",
+          "x-go-name": "Field"
+        },
+        "issue_number": {
+          "description": "the number of the issue or pull request, with field title or body",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "IssueNumber"
+        }
+      },
+      "x-go-package": "forgejo.org/modules/structs"
+    },
     "Reference": {
       "description": "Reference represents a Git reference",
       "type": "object",
@@ -42109,7 +42200,7 @@
           "$ref": "#/definitions/SecretScanningLocationDetails"
         },
         "type": {
-          "description": "commit (the code of the repository, or a pull ref) or wiki_commit",
+          "description": "commit (the code of the repository, or a pull ref), wiki_commit, or a place in text:\nissue_title, issue_body, issue_comment, pull_request_title, pull_request_body, pull_request_comment; for a\ncaller who may not read that issue or pull request it is only issue_text or comment_text, with no details",
           "type": "string",
           "x-go-name": "Type"
         }
@@ -42128,6 +42219,12 @@
           "description": "the API URL of the blob (not for the wiki)",
           "type": "string",
           "x-go-name": "BlobURL"
+        },
+        "comment_id": {
+          "description": "spoved: for a place in a comment the caller may read, the ID of the comment",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "CommentID"
         },
         "commit_author_email": {
           "type": "string",
@@ -42157,10 +42254,36 @@
           "format": "int64",
           "x-go-name": "EndLine"
         },
+        "field": {
+          "description": "spoved: for a place in text the caller may read, the part that holds the secret: title, body or comment",
+          "type": "string",
+          "x-go-name": "Field"
+        },
         "html_url": {
-          "description": "spoved: the file at that commit in the web interface (empty when the place has no commit, and for the wiki)",
+          "description": "spoved: the page of the file at that commit, or of the issue, pull request or comment, in the web interface\n(empty when the place has no commit and no text, and for the wiki)",
           "type": "string",
           "x-go-name": "HTMLURL"
+        },
+        "issue_body_url": {
+          "description": "the API URL of the issue, for an issue_body place",
+          "type": "string",
+          "x-go-name": "IssueBodyURL"
+        },
+        "issue_comment_url": {
+          "description": "the API URL of the comment, for an issue_comment place",
+          "type": "string",
+          "x-go-name": "IssueCommentURL"
+        },
+        "issue_number": {
+          "description": "spoved: for a place in text the caller may read, the number of the issue or pull request",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "IssueNumber"
+        },
+        "issue_title_url": {
+          "description": "the API URL of the issue, for an issue_title place",
+          "type": "string",
+          "x-go-name": "IssueTitleURL"
         },
         "page_url": {
           "description": "the page, for the wiki",
@@ -42171,10 +42294,35 @@
           "type": "string",
           "x-go-name": "Path"
         },
+        "poster": {
+          "description": "spoved: for a place in text the caller may read, the login of who wrote it (empty for an import)",
+          "type": "string",
+          "x-go-name": "Poster"
+        },
         "pull_ref": {
           "description": "spoved: true when only a refs/pull/* ref reaches the commit",
           "type": "boolean",
           "x-go-name": "PullRef"
+        },
+        "pull_request_body_url": {
+          "description": "the API URL of the pull request, for a pull_request_body place",
+          "type": "string",
+          "x-go-name": "PullRequestBodyURL"
+        },
+        "pull_request_comment_url": {
+          "description": "the API URL of the comment, for a pull_request_comment place",
+          "type": "string",
+          "x-go-name": "PullRequestCommentURL"
+        },
+        "pull_request_title_url": {
+          "description": "the API URL of the pull request, for a pull_request_title place",
+          "type": "string",
+          "x-go-name": "PullRequestTitleURL"
+        },
+        "removed": {
+          "description": "spoved: true when the text no longer holds the secret (the alert stays); on an issue_text or comment_text place with no other detail, true when the issue or comment was deleted (only said to a caller who reads issues and pull requests)",
+          "type": "boolean",
+          "x-go-name": "Removed"
         },
         "start_line": {
           "type": "integer",
@@ -42206,7 +42354,7 @@
           "x-go-name": "Reason"
         },
         "skipped_large": {
-          "description": "files over the size limit that were not read",
+          "description": "files over the size limit that were not read, counted since the last scan from the beginning (a rescan)",
           "type": "integer",
           "format": "int64",
           "x-go-name": "SkippedLarge"

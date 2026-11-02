@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 
 	"forgejo.org/models/db"
@@ -29,6 +30,16 @@ const (
 	KindWiki = "wiki"
 	KindPull = "pull"
 )
+
+// The kinds of a place in text people write: the title or body of an issue or pull request, and a comment. KindIssue
+// is also the kind of the scan state row of a repository's text (its cursor is kept in ScannedTips). A reader shows
+// a place in text only to a viewer who may read that issue or pull request (LoadTextPlaces).
+const (
+	KindIssue   = "issue"
+	KindComment = "comment"
+)
+
+var TextKinds = []string{KindIssue, KindComment}
 
 // Scan statuses. Incomplete: the scan is under way (a slice ended at a limit) or has holes, parts that were not
 // scanned (Scan.Holes); holes stay until the state is reset, and a trigger with nothing new changes nothing.
@@ -62,11 +73,14 @@ type Scan struct {
 	RepoID int64  `xorm:"UNIQUE(repo_kind) NOT NULL"`
 	Kind   string `xorm:"VARCHAR(8) UNIQUE(repo_kind) NOT NULL"`
 	// ScannedTips is a JSON list of commit IDs whose whole history is scanned. It holds ref tips (those of refs/pull/*
-	// in the pull row), so it is never shown: no API or page returns it (only status, counts and the error code).
+	// in the pull row), so it is never shown: no API or page returns it (only status, counts and the error code). In
+	// the row of kind issue (the text scan) it holds the backfill's cursor, a JSON object of issue and comment IDs.
 	ScannedTips string `xorm:"LONGTEXT"`
 	Status      string `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
 	Error       string `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"` // a code, never text from git
-	// Blobs, Bytes and SkippedLarge count the last scan: the files read, their size and the files over MAX_BLOB_SIZE
+	// Blobs and Bytes count the last scan: the files read and their size. SkippedLarge counts the files over
+	// MAX_BLOB_SIZE that were not read since the scan started from the beginning (a rescan resets it), so a later push
+	// doesn't make them look read. It is an upper bound: a file reached again (a merged pull ref, a revert) counts again
 	Blobs        int64 `xorm:"NOT NULL DEFAULT 0"`
 	Bytes        int64 `xorm:"NOT NULL DEFAULT 0"`
 	SkippedLarge int64 `xorm:"NOT NULL DEFAULT 0"`
@@ -148,6 +162,15 @@ type Location struct {
 	AuthorName  string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"` // the commit's text, for display only: spoofable
 	AuthorEmail string `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
 	CommitUnix  int64  `xorm:"NOT NULL DEFAULT 0"`
+
+	// Of a place in text (kinds issue and comment): the issue or comment, the issue it belongs to, the field
+	// ("title" or "body" for an issue, "" for a comment), who wrote it (0: nobody known) and when the text stopped
+	// holding the secret (0: it still does). The text itself is never stored.
+	SourceID    int64  `xorm:"INDEX NOT NULL DEFAULT 0"`
+	IssueID     int64  `xorm:"INDEX NOT NULL DEFAULT 0"`
+	Field       string `xorm:"VARCHAR(8) NOT NULL DEFAULT ''"`
+	PosterID    int64  `xorm:"NOT NULL DEFAULT 0"`
+	RemovedUnix int64  `xorm:"NOT NULL DEFAULT 0"`
 }
 
 func (*Location) TableName() string { return "secret_scanning_location" }
@@ -191,6 +214,16 @@ func NewLocation(repoID int64, kind, blobID, path string, startLine, endLine int
 		RepoID: repoID, Kind: kind, BlobID: blobID, Path: cleanText(path, maxPathLen), PathHash: PathHash(path),
 		StartLine: startLine, EndLine: endLine, CommitID: commitID,
 		AuthorName: cleanText(authorName, maxAuthorLen), AuthorEmail: cleanText(authorEmail, maxAuthorLen), CommitUnix: commitUnix,
+	}
+}
+
+// NewTextLocation fills a place in the text of an issue (kind issue, field title or body, source the issue) or of a
+// comment (kind comment, field ""). The path stands for the text in the unique key; no text is kept.
+func NewTextLocation(repoID int64, kind string, sourceID, issueID int64, field string, startLine, endLine int, posterID int64) *Location {
+	path := kind + ":" + strconv.FormatInt(sourceID, 10) + ":" + field
+	return &Location{
+		RepoID: repoID, Kind: kind, Path: field, PathHash: PathHash(path), StartLine: startLine, EndLine: endLine,
+		SourceID: sourceID, IssueID: issueID, Field: field, PosterID: posterID,
 	}
 }
 
@@ -262,24 +295,42 @@ func GetAlertsByFingerprints(ctx context.Context, repoID int64, fingerprints []s
 	return alerts, db.GetEngine(ctx).Where("repo_id = ?", repoID).In("fingerprint", fingerprints).Find(&alerts)
 }
 
-// CountOpenAlerts counts the open alerts of a repository, in one query: all of them, and those that only
-// refs/pull/* reach. Closed alerts don't count towards the caps.
-func CountOpenAlerts(ctx context.Context, repoID int64) (total, viaPull int64, err error) {
+// OpenAlertCounts are the open alerts of a repository by cap: those of built-in rules (Total) and of them those that
+// only refs/pull/* reach, and those of custom patterns (Custom), which have a cap of their own, and of them those that
+// only refs/pull/* reach. Closed alerts don't count towards the caps.
+type OpenAlertCounts struct {
+	Total, ViaPull, Custom, CustomViaPull int64
+}
+
+// CountOpenAlertsByCap counts the open alerts of a repository by cap, in one query.
+func CountOpenAlertsByCap(ctx context.Context, repoID int64) (c OpenAlertCounts, err error) {
+	const isCustom = "CASE WHEN secret_type = 'custom' THEN 1 ELSE 0 END"
 	var rows []struct {
 		ViaPull bool  `xorm:"via_pull"`
+		Custom  int   `xorm:"custom"`
 		N       int64 `xorm:"n"`
 	}
-	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("via_pull, COUNT(*) AS n").
-		Where("repo_id = ? AND state = ?", repoID, StateOpen).GroupBy("via_pull").Find(&rows); err != nil {
-		return 0, 0, err
+	if err := db.GetEngine(ctx).Table("secret_scanning_alert").Select("via_pull, "+isCustom+" AS custom, COUNT(*) AS n").
+		Where("repo_id = ? AND state = ?", repoID, StateOpen).GroupBy("via_pull, " + isCustom).Find(&rows); err != nil {
+		return c, err
 	}
 	for _, r := range rows {
-		total += r.N
+		total, pulls := &c.Total, &c.ViaPull
+		if r.Custom == 1 {
+			total, pulls = &c.Custom, &c.CustomViaPull
+		}
+		*total += r.N
 		if r.ViaPull {
-			viaPull += r.N
+			*pulls += r.N
 		}
 	}
-	return total, viaPull, nil
+	return c, nil
+}
+
+// CountOpenAlerts is CountOpenAlertsByCap without the pull-only custom alerts.
+func CountOpenAlerts(ctx context.Context, repoID int64) (total, viaPull, custom int64, err error) {
+	c, err := CountOpenAlertsByCap(ctx, repoID)
+	return c.Total, c.ViaPull, c.Custom, err
 }
 
 // ClearViaPull marks alerts as reached by something other than refs/pull/*.
@@ -421,10 +472,15 @@ func FindOrgOffRepos(ctx context.Context, orgID int64, opts db.ListOptions) (rep
 // scannedRepoCond is the ready repositories that have a scan state and secret scanning isn't off for below the site
 // (an organization's, or all of them with 0).
 func scannedRepoCond(orgID int64) builder.Cond {
+	return builder.And(readyRepoCond(orgID), builder.Exists(builder.Select("1").From("secret_scan").Where(builder.Expr("secret_scan.repo_id = repository.id"))))
+}
+
+// readyRepoCond is scannedRepoCond without the scan state: for an UPDATE of secret_scan rows, whose rows are the scan
+// state, and which must not read secret_scan in a subquery (MySQL refuses it, error 1093).
+func readyRepoCond(orgID int64) builder.Cond {
 	cond := builder.And(
 		builder.Eq{"repository.status": repo_model.RepositoryReady, "repository.trashed_unix": 0},
 		builder.Not{OffCond()},
-		builder.Exists(builder.Select("1").From("secret_scan").Where(builder.Expr("secret_scan.repo_id = repository.id"))),
 	)
 	if orgID != 0 {
 		cond = cond.And(builder.Eq{"repository.owner_id": orgID})
@@ -436,11 +492,34 @@ func scannedRepoCond(orgID int64) builder.Cond {
 // It runs in the transaction that saves the switch, so the mark and the setting stand or fall together.
 func MarkRequeue(ctx context.Context, orgID int64) error {
 	// a digest mark that waited while scanning was off keeps its alerts, but not its pusher (a later push is not theirs)
-	if _, err := DetachNotifyPushers(ctx, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID)))); err != nil {
+	if _, err := DetachNotifyPushers(ctx, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(readyRepoCond(orgID)))); err != nil {
 		return err
 	}
 	_, err := db.GetEngine(ctx).NoAutoTime().
-		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scannedRepoCond(orgID))))).
+		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(readyRepoCond(orgID))))).
+		Incr("requeue").Update(&Scan{})
+	return err
+}
+
+// ResetTextScans makes the text scan of the repository (of every repository with 0) start from the beginning (its row
+// reset as ResetScans does) and marks it to be scanned again, if it was scanned: in the transaction that turns the text
+// scan, or a repository's Issues or Pull requests unit, on (text written or kept while it was off was not scanned).
+// The reset cursor '[]' doesn't read as a cursor object, so the backfill starts from the first issue, and the empty
+// status tells it the row is not done.
+func ResetTextScans(ctx context.Context, repoID int64) error {
+	reset := builder.Eq{"kind": KindIssue}
+	scanned := readyRepoCond(0) // the rows updated are the scan state
+	if repoID != 0 {
+		reset["repo_id"] = repoID
+		scanned = scanned.And(builder.Eq{"repository.id": repoID})
+	}
+	if _, err := db.GetEngine(ctx).Where(reset).NoAutoTime().
+		SetExpr("scanned_tips", "'[]'").SetExpr("status", "''").SetExpr("error", "''").SetExpr("fail_count", 0).
+		SetExpr("retry_unix", 0).SetExpr("holes", 0).Incr("version").Update(&Scan{}); err != nil {
+		return err
+	}
+	_, err := db.GetEngine(ctx).NoAutoTime().
+		Where(builder.And(builder.Eq{"kind": KindRepo}, builder.In("repo_id", builder.Select("repository.id").From("repository").Where(scanned)))).
 		Incr("requeue").Update(&Scan{})
 	return err
 }

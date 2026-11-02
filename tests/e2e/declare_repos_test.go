@@ -4,6 +4,8 @@
 package e2e
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
@@ -25,6 +27,7 @@ import (
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/indexer/stats"
+	"forgejo.org/modules/secretdetection"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/timeutil"
@@ -155,38 +158,58 @@ func DeclareGitRepos(t *testing.T) {
 			Filename: "config/prod.env",
 			Versions: []string{"KEY=placeholder"},
 		}}, func(user *user_model.User, repo *repo_model.Repository) {
-			commit := headCommit(t, repo)
-			for _, a := range []struct {
-				rule, kind, path string
-				places           int
-				closed           bool
-			}{
+			seedSecretAlerts(t, user, repo, []seededSecretAlert{
 				{"aws-access-key-id", "aws", "config/prod.env", 3, false},
 				{"github-token", "github", "scripts/deploy.sh", 1, false},
 				{"slack-token", "slack", "src/notify/slack.js", 2, false},
 				{"private-key", "private-key", "deploy/certs/server.pem", 1, false},
 				{"generic-secret-assignment", "generic", "tests/fixtures/auth.json", 1, false},
 				{"aws-access-key-id", "aws", "infra/old/main.tf", 1, true},
-			} {
-				alert := &secretscan_model.Alert{
-					RepoID: repo.ID, RuleID: a.rule, SecretType: a.kind, LocationCount: a.places,
-					Fingerprint: fmt.Sprintf("%064x", rand.Int63()),
-				}
-				if a.closed {
-					alert.State, alert.Reason, alert.Comment, alert.ClosedByID, alert.ClosedUnix = secretscan_model.StateRevoked, secretscan_model.StateRevoked, "Rotated.", user.ID, now
-				}
-				require.NoError(t, secretscan_model.InsertAlert(db.DefaultContext, alert))
-				var locs []*secretscan_model.Location
-				for i := range a.places {
-					l := secretscan_model.NewLocation(repo.ID, secretscan_model.KindRepo, fmt.Sprintf("blob%d%s", i, alert.Fingerprint[:8]), a.path, 14+i, 14+i, commit, "Sam Example", "sam@example.com", int64(now))
-					l.AlertID = alert.ID
-					locs = append(locs, l)
-				}
-				require.NoError(t, secretscan_model.InsertLocations(db.DefaultContext, locs))
+			})
+		})
+	}
+	// the places of secret alerts in text (secret-alerts-text.test.e2e.ts): one repository whose owner reads its issues and
+	// pull requests, and one where both units are off, so nobody does
+	for _, name := range []string{"secret-text-test", "secret-text-hidden"} {
+		newRepo(t, 11, name, nil, []FileChanges{{
+			Filename: "config/prod.env",
+			Versions: []string{"KEY=placeholder"},
+		}}, func(user *user_model.User, repo *repo_model.Repository) {
+			seedSecretTextAlerts(t, user, repo)
+			if name == "secret-text-hidden" {
+				_, err := db.GetEngine(db.DefaultContext).Exec("DELETE FROM repo_unit WHERE repo_id = ? AND type IN (?, ?)", repo.ID, unit_model.TypeIssues, unit_model.TypePullRequests)
+				require.NoError(t, err)
 			}
-			_, err := secretscan_model.DeleteScans(db.DefaultContext, repo.ID) // the push may have started a scan
-			require.NoError(t, err)
-			require.NoError(t, secretscan_model.Save(db.DefaultContext, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
+		})
+	}
+	// the redaction of a secret in text (secret-alerts-redact.test.e2e.ts): an issue whose body holds a secret, and a
+	// comment whose place is stored but whose text no longer holds it
+	newRepo(t, 11, "secret-redact-test", nil, []FileChanges{{
+		Filename: "docs/deploy.md",
+		Versions: []string{"redact"},
+	}}, func(user *user_model.User, repo *repo_model.Repository) {
+		seedSecretRedact(t, user, repo)
+	})
+	// the secret alert lists (secret-alerts-lists.test.e2e.ts): alerts in two repositories of org3, which its owner user2
+	// and the site admin list; the closer of the closed one is user2
+	for _, r := range []struct {
+		name   string
+		alerts []seededSecretAlert
+	}{
+		{"secret-lists-api", []seededSecretAlert{
+			{"aws-access-key-id", "aws", "config/prod.env", 3, false},
+			{"github-token", "github", "scripts/deploy.sh", 1, false},
+		}},
+		{"secret-lists-web", []seededSecretAlert{
+			{"slack-token", "slack", "src/notify.js", 2, false},
+			{"private-key", "private-key", "certs/server.pem", 1, true},
+		}},
+	} {
+		newRepo(t, 3, r.name, nil, []FileChanges{{
+			Filename: "config/app.env",
+			Versions: []string{"KEY=placeholder"},
+		}}, func(_ *user_model.User, repo *repo_model.Repository) {
+			seedSecretAlerts(t, unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2}), repo, r.alerts)
 		})
 	}
 	// the Security tab of org3 (org-security.test.e2e.ts): example-glob in two repositories, one of them also with a range only
@@ -776,4 +799,103 @@ func headCommit(t *testing.T, repo *repo_model.Repository) string {
 	sha, err := gitRepo.GetBranchCommitID(repo.DefaultBranch)
 	require.NoError(t, err)
 	return sha
+}
+
+type seededSecretAlert struct {
+	rule, kind, path string
+	places           int
+	closed           bool // closed as revoked by the given user
+}
+
+// seedSecretAlerts stores alerts with their places in a repository whose scan is complete, as a scan would have left
+// them; the closed ones are closed by user.
+func seedSecretAlerts(t *testing.T, user *user_model.User, repo *repo_model.Repository, alerts []seededSecretAlert) {
+	t.Helper()
+	commit := headCommit(t, repo)
+	now := timeutil.TimeStampNow()
+	for _, a := range alerts {
+		alert := &secretscan_model.Alert{
+			RepoID: repo.ID, RuleID: a.rule, SecretType: a.kind, LocationCount: a.places,
+			Fingerprint: fmt.Sprintf("%064x", rand.Int63()),
+		}
+		if a.closed {
+			alert.State, alert.Reason, alert.Comment, alert.ClosedByID, alert.ClosedUnix = secretscan_model.StateRevoked, secretscan_model.StateRevoked, "Rotated.", user.ID, now
+		}
+		require.NoError(t, secretscan_model.InsertAlert(db.DefaultContext, alert))
+		var locs []*secretscan_model.Location
+		for i := range a.places {
+			l := secretscan_model.NewLocation(repo.ID, secretscan_model.KindRepo, fmt.Sprintf("blob%d%s", i, alert.Fingerprint[:8]), a.path, 14+i, 14+i, commit, "Sam Example", "sam@example.com", int64(now))
+			l.AlertID = alert.ID
+			locs = append(locs, l)
+		}
+		require.NoError(t, secretscan_model.InsertLocations(db.DefaultContext, locs))
+	}
+	_, err := secretscan_model.DeleteScans(db.DefaultContext, repo.ID) // the push may have started a scan
+	require.NoError(t, err)
+	require.NoError(t, secretscan_model.Save(db.DefaultContext, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
+}
+
+// seedSecretTextAlerts stores three alerts of a repository that have places in text: a token in an issue's description
+// and in a comment of it (the comment's place was removed again), a key only in the title of a pull request, and a
+// token in code and in a comment.
+func seedSecretTextAlerts(t *testing.T, user *user_model.User, repo *repo_model.Repository) {
+	t.Helper()
+	ctx := db.DefaultContext
+	issue := &issues_model.Issue{RepoID: repo.ID, Index: 1, PosterID: 2, Title: "Deploy fails on staging"}
+	pull := &issues_model.Issue{RepoID: repo.ID, Index: 2, PosterID: user.ID, Title: "Add the staging config", IsPull: true}
+	require.NoError(t, db.Insert(ctx, issue))
+	require.NoError(t, db.Insert(ctx, pull))
+	commit := headCommit(t, repo)
+	now := timeutil.TimeStampNow()
+	seed := func(rule, kind string, locs ...*secretscan_model.Location) {
+		alert := &secretscan_model.Alert{RepoID: repo.ID, RuleID: rule, SecretType: kind, LocationCount: len(locs), ViaPull: true, Fingerprint: fmt.Sprintf("%064x", rand.Int63())}
+		require.NoError(t, secretscan_model.InsertAlert(ctx, alert))
+		for _, l := range locs {
+			l.AlertID = alert.ID
+		}
+		require.NoError(t, secretscan_model.InsertLocations(ctx, locs))
+	}
+	removed := secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindComment, 9001, issue.ID, "", 1, 1, user.ID)
+	removed.RemovedUnix = int64(now)
+	seed("github-token", "github",
+		secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindIssue, issue.ID, issue.ID, "body", 4, 4, 2),
+		removed)
+	seed("aws-access-key-id", "aws", secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindIssue, pull.ID, pull.ID, "title", 1, 1, user.ID))
+	code := secretscan_model.NewLocation(repo.ID, secretscan_model.KindRepo, "blobtext", "config/prod.env", 1, 1, commit, "Sam Example", "sam@example.com", int64(now))
+	seed("slack-token", "slack", code, secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindComment, 9002, pull.ID, "", 2, 2, 2))
+	_, err := secretscan_model.DeleteScans(ctx, repo.ID)
+	require.NoError(t, err)
+	require.NoError(t, secretscan_model.Save(ctx, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
+}
+
+// seedSecretRedact stores, for each browser project of the spec (issue and alert 1 chromium, 2 firefox, 3 Mobile
+// Chrome), an issue whose body holds a secret and an alert with its places, with the fingerprint the detector gives,
+// so the Redact action finds the secret again; the secret was edited out of the comment, but its edit history holds it.
+func seedSecretRedact(t *testing.T, user *user_model.User, repo *repo_model.Repository) {
+	t.Helper()
+	ctx := db.DefaultContext
+	for i := int64(1); i <= 3; i++ {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("secret-redact-e2e-%d", i)))
+		tok := "ghp" + "_" + hex.EncodeToString(sum[:])[:36] // built from parts: never a token literal
+		issue := &issues_model.Issue{RepoID: repo.ID, Index: i, PosterID: user.ID, Title: "Staging deploy notes", Content: "Use this to deploy:\n" + tok + "\nThanks"}
+		require.NoError(t, db.Insert(ctx, issue))
+		comment := &issues_model.Comment{Type: issues_model.CommentTypeComment, IssueID: issue.ID, PosterID: user.ID, Content: "I rotated it already."}
+		require.NoError(t, db.Insert(ctx, comment))
+		// the comment held the secret before its poster edited it out: its edit history still does
+		require.NoError(t, issues_model.SaveIssueContentHistory(ctx, user.ID, issue.ID, comment.ID, comment.CreatedUnix, "Try "+tok, true))
+		require.NoError(t, issues_model.SaveIssueContentHistory(ctx, user.ID, issue.ID, comment.ID, comment.CreatedUnix+1, comment.Content, false))
+		alert := &secretscan_model.Alert{RepoID: repo.ID, RuleID: "github-token", SecretType: "github", LocationCount: 2, ViaPull: true, Fingerprint: secretdetection.Fingerprint([]byte(tok))}
+		require.NoError(t, secretscan_model.InsertAlert(ctx, alert))
+		locs := []*secretscan_model.Location{
+			secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindIssue, issue.ID, issue.ID, "body", 2, 2, user.ID),
+			secretscan_model.NewTextLocation(repo.ID, secretscan_model.KindComment, comment.ID, issue.ID, "", 1, 1, user.ID),
+		}
+		for _, l := range locs {
+			l.AlertID = alert.ID
+		}
+		require.NoError(t, secretscan_model.InsertLocations(ctx, locs))
+	}
+	_, err := secretscan_model.DeleteScans(ctx, repo.ID)
+	require.NoError(t, err)
+	require.NoError(t, secretscan_model.Save(ctx, nil, &secretscan_model.Scan{RepoID: repo.ID, Kind: secretscan_model.KindRepo, ScannedTips: "[]", Status: secretscan_model.StatusOK}))
 }

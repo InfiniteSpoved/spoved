@@ -43,6 +43,18 @@ import (
 	"forgejo.org/modules/json"
 )
 
+// firebaseSampleKeys are the GCP API keys of the Firebase SDK samples
+// (gitleaks' allowlist), without the AIza prefix so no full key is a literal.
+var firebaseSampleKeys = []string{
+	"SyAnLA7NfeLquW1tJFpx_eQCxoX-oo6YyIs", "SyCkEhVjf3pduRDt6d1yKOMitrUEke8agEM", "SyDMAScliyLx7F0NPDEJi1QmyCgHIAODrlU",
+	"SyD3asb-2pEZVqMkmL6M9N6nHZRR_znhrh0", "yDNSXIbFmlXbIE6mCzDLQAqITYefhixbX4A", "SyAdOS2zB6NCsk1pCdZ4-P6GBdi_UUPwX7c",
+	"SyASWm6HmTMdYWpgMnjRBjxcQ9CKctWmLd4", "SyANUvH9H9BsUccjsu2pCmEkOPjjaXeDQgY", "SyA5_iVawFQ8ABuTZNUdcwERLJv_a_p4wtM",
+	"SyA4UrcGxgwQFTfaI3no3t7Lt1sjmdnP5sQ", "SyDSb51JiIcB6OJpwwMicseKRhhrOq1cS7g", "SyBF2RrAIm4a0mO64EShQfqfd2AFnzAvvuU",
+	"SyBcE-OOIbhjyR83gm4r2MFCu4MJmprNXsw", "SyB8qGxt4ec15vitgn44duC5ucxaOi4FmqE", "SyA8vmApnrHNFE0bApF4hoZ11srVL_n0nvY",
+}
+
+var firebaseSampleKeysRegex = `^AIza(?:` + strings.Join(firebaseSampleKeys, "|") + `)$`
+
 // placeholders are dropped by every built-in rule: documentation examples,
 // runs of x, ${VAR} and {{ var }} templates, <token> markers.
 var placeholders = []string{`(?i)example`, `(?i)x{5,}`, `\$\{`, `\{\{`, `<[^<>\s]{2,40}>`}
@@ -53,7 +65,11 @@ const (
 	wordChars  = alnumChars + "_-"
 )
 
-var builtinRules = []Rule{
+// builtinRules: the generic rule last, so a specific rule wins an overlap; see
+// curlHeaderRules for the curl rules' places.
+var builtinRules = slices.Concat(baseRules, gitleaksRules, curlUserRules, gitleaksServiceRules, curlHeaderRules, []Rule{genericRule})
+
+var baseRules = []Rule{
 	{
 		ID: "aws-access-key-id", Name: "AWS access key ID", Type: "aws",
 		Keywords:    []string{"akia", "asia", "abia", "acca", "a3t"},
@@ -102,6 +118,14 @@ var builtinRules = []Rule{
 		Window: 4, Anchored: true, KeywordOffset: 76, HitCheck: azdoHit,
 	},
 	{
+		// The older PATs are 52 lowercase characters with no marker, so they
+		// only count within 40 bytes after azure, devops or ado_pat.
+		ID: "azure-devops-pat-legacy", Name: "Azure DevOps personal access token (52 characters)", Type: "azure",
+		Keywords:    []string{"azure", "devops", "ado_pat"},
+		Regex:       `(?i:azure|devops|ado_pat)[^\r\n]{0,40}?[^0-9a-z\r\n]([0-9a-z]{52})`,
+		SecretGroup: 1, MinEntropy: 3.5, TokenChars: alnumChars, Window: 100, Anchored: true, HitCheck: azdoLegacyHit,
+	},
+	{
 		ID: "azure-ad-client-secret", Name: "Azure AD client secret", Type: "azure",
 		Keywords:    []string{"q~"},
 		Regex:       `([a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.-]{31,34})`,
@@ -122,6 +146,7 @@ var builtinRules = []Rule{
 		Keywords:    []string{"aiza"},
 		Regex:       `(AIza[\w-]{35})`,
 		SecretGroup: 1, MinEntropy: 3.5, TokenChars: wordChars, TrailingOK: "-",
+		Allowlist: []string{firebaseSampleKeysRegex},
 	},
 	{
 		// ghp_ personal, gho_ OAuth, ghu_ user-to-server, ghs_ server-to-server, ghr_ refresh.
@@ -129,6 +154,17 @@ var builtinRules = []Rule{
 		Keywords:    []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_"},
 		Regex:       `(gh[pousr]_[0-9A-Za-z]{36,251})`,
 		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars,
+	},
+	{
+		// The legacy form is 40 hex characters, as an OAuth app's client
+		// secret: it counts after a github name that ends in a secret, pat,
+		// key or password word (github_secret, GITHUB_CLIENT_SECRET). A bare
+		// GITHUB_TOKEN is left to the Forgejo rules: Actions on spoved set
+		// it to spoved's own job token.
+		ID: "github-legacy-token", Name: "GitHub token or client secret (40 hex characters)", Type: "github",
+		Keywords:    []string{"github"},
+		Regex:       `(?i:github)(?:[\w.-]{0,20}[_.-])?(?i:secret|pat|key|password)(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?([0-9a-f]{40})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars, Window: 512, Anchored: true, HitCheck: githubHit,
 	},
 	{
 		ID: "github-fine-grained-pat", Name: "GitHub fine-grained personal access token", Type: "github",
@@ -196,11 +232,12 @@ var builtinRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3, Normalize: normalizePEM, MaxSecretLen: maxPrivateKeyLen,
 	},
 	{
-		// xoxb bot, xoxp user, xoxa app, xoxr refresh (also the legacy forms
-		// with one group of digits), xapp app-level, xoxe rotating tokens.
+		// xoxb bot, xoxp user, xoxa app (xoxa-2-<3 IDs>-<hex>), xoxr refresh,
+		// legacy xoxs/xoxo (<3 IDs>-<hex>) and the legacy forms with one
+		// group of digits, xapp app-level, xoxe rotating tokens.
 		ID: "slack-token", Name: "Slack token", Type: "slack",
-		Keywords:    []string{"xoxb-", "xoxp-", "xoxa-", "xoxr-", "xapp-", "xoxe"},
-		Regex:       `(xapp-[0-9]-[A-Za-z0-9]{6,}-[0-9]{8,}-[A-Za-z0-9]{32,}|xoxe\.xox[bp]-[0-9]-[A-Za-z0-9]{100,}|xoxe-[0-9]-[A-Za-z0-9]{100,}|xox[bpar]-[0-9]{1,14}(?:-[0-9A-Za-z]{8,40}){1,3})`,
+		Keywords:    []string{"xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxs-", "xoxo-", "xapp-", "xoxe"},
+		Regex:       `(xapp-[0-9]-[A-Za-z0-9]{6,}-[0-9]{8,}-[A-Za-z0-9]{32,}|xoxe\.xox[bp]-[0-9]-[A-Za-z0-9]{100,}|xoxe-[0-9]-[A-Za-z0-9]{100,}|xox[bparso]-[0-9]{1,14}(?:-[0-9A-Za-z]{8,64}){1,4})`,
 		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
 	},
 	{
@@ -210,9 +247,10 @@ var builtinRules = []Rule{
 		SecretGroup: 1, MinEntropy: 3,
 	},
 	{
+		// live and prod (gitleaks' stripe-access-token)
 		ID: "stripe-live-key", Name: "Stripe live secret key", Type: "stripe",
-		Keywords:    []string{"sk_live_", "rk_live_"},
-		Regex:       `((?:sk|rk)_live_[0-9A-Za-z]{10,247})`,
+		Keywords:    []string{"sk_live_", "rk_live_", "sk_prod_", "rk_prod_"},
+		Regex:       `((?:sk|rk)_(?:live|prod)_[0-9A-Za-z]{10,247})`,
 		SecretGroup: 1, MinEntropy: 2, TokenChars: alnumChars,
 		Window: 300,
 	},
@@ -226,23 +264,37 @@ var builtinRules = []Rule{
 	},
 	{
 		// Three base64url parts; header and payload start with eyJ (`{"`). The
-		// signature may be empty (alg none, which still counts). The token of
-		// jwt.io's documentation is no secret.
+		// signature may be empty (alg none, which still counts); a short one
+		// of letters only ("signature") is a documentation sample. The token
+		// of jwt.io's documentation is no secret. RS256 tokens with claims
+		// are often over 1 KiB.
 		ID: "jwt", Name: "JSON Web Token", Type: "jwt",
 		Keywords:    []string{"eyj"},
 		Regex:       `(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`,
-		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars,
-		Check:     jwtHeaderHasAlg,
-		Allowlist: []string{`\.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c$`},
+		SecretGroup: 1, MinEntropy: 3, TokenChars: wordChars, MaxSecretLen: 8 << 10,
+		Check:     jwtCheck,
+		Allowlist: []string{jwtIOSignature},
 	},
 	{
-		// Dotted names (locale keys, settings) are no secrets.
-		ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
-		Keywords:    []string{"secret", "password", "passwd", "token", "key"},
-		Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}(?:\\?["'])?\s*(?::=|[:=])\s*\\?["']((?:[^\s"'\x60\\]|\\[^\s"'\x60]){20,100})\\?["']`,
-		SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 512, Anchored: true, HitCheck: genericHit,
-		Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
+		// A JWT in base64 on one line (a Kubernetes secret, base64 -w0; GNU
+		// base64's wrapped output is not decoded): the secret is the decoded
+		// JWT and its findings are the jwt rule's, so both forms are one alert.
+		ID: "jwt-base64", Name: "JSON Web Token in base64", Type: "jwt", ReportAs: "jwt",
+		Keywords:    []string{"zxlk"},
+		Regex:       `(ZXlK[A-Za-z0-9+/]{40,}={0,2})`,
+		SecretGroup: 1, MinEntropy: 3, TokenChars: alnumChars + "+/", MaxSecretLen: 8 << 10,
+		Normalize: decodeBase64JWT, Check: jwtCheck,
+		Allowlist: []string{jwtIOSignature},
 	},
+}
+
+// Dotted names (locale keys, settings) are no secrets.
+var genericRule = Rule{
+	ID: "generic-secret-assignment", Name: "Generic secret assignment", Type: "generic",
+	Keywords:    []string{"secret", "password", "passwd", "token", "key"},
+	Regex:       `(?i)(?:secret|password|passwd|token|key)[\w.-]{0,20}(?:\\?["'])?\s*(?::=|[:=])\s*\\?["']((?:[^\s"'\x60\\]|\\[^\s"'\x60]){20,100})\\?["']`,
+	SecretGroup: 1, MinEntropy: 3.5, DefaultOff: true, Window: 512, Anchored: true, HitCheck: genericHit,
+	Allowlist: []string{`^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$`},
 }
 
 // The hit checks below are the cheap exact tests of the hot rules: they let a
@@ -266,6 +318,21 @@ func azdoHit(_, c []byte, p int) bool {
 	}
 	return true
 }
+
+// azdoLegacyHit: within 40 bytes of the line after the keyword (5 to 7
+// bytes), a byte that is no lowercase alphanumeric, then exactly 52 of them.
+func azdoLegacyHit(_, c []byte, p int) bool {
+	isLowerAlnum := func(b byte) bool { return '0' <= b && b <= '9' || 'a' <= b && b <= 'z' }
+	for i := p + len("azure"); i < len(c) && i <= p+len("ado_pat")+40 && c[i] != '\n' && c[i] != '\r'; i++ {
+		if !isLowerAlnum(c[i]) && run(c, i+1, 52, isLowerAlnum) == 52 {
+			return true
+		}
+	}
+	return false
+}
+
+// githubHit: "github", a name rest, an assignment, then 40 hex digits.
+func githubHit(_, c []byte, p int) bool { return hex40After(c, p+len("github"), 40) }
 
 func isWord(b byte) bool { return isAlnum(b) || b == '_' }
 
@@ -336,8 +403,10 @@ func run(c []byte, i, max int, ok func(byte) bool) int {
 // tokenHit: "token", a short name rest, an assignment, then 40 lowercase hex
 // digits (as the pattern; capitals are the pattern's business, the hit only
 // needs the digits to be there).
-func tokenHit(_, c []byte, p int) bool {
-	i, ok := valueAfter(c, p+len("token"), 20, false, false)
+func tokenHit(_, c []byte, p int) bool { return hex40After(c, p+len("token"), 20) }
+
+func hex40After(c []byte, i, gap int) bool {
+	i, ok := valueAfter(c, i, gap, false, false)
 	return ok && run(c, i, 40, func(b byte) bool { return isHexLower(b) || 'A' <= b && b <= 'F' }) >= 40
 }
 
@@ -500,8 +569,33 @@ func unescape(s string) string {
 	return b.String()
 }
 
-// jwtHeaderHasAlg: the first part of a JWT is a JSON object with "alg".
-func jwtHeaderHasAlg(secret []byte) bool {
+// jwtIOSignature is the signature of jwt.io's documentation token.
+const jwtIOSignature = `\.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c$`
+
+var jwtShape = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*$`)
+
+// decodeBase64JWT is the JWT a base64 text holds (a trailing line break
+// dropped), or nothing.
+func decodeBase64JWT(secret []byte) []byte {
+	raw, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(string(secret), "="))
+	if err != nil {
+		return nil
+	}
+	if raw = bytes.TrimRight(raw, "\r\n"); !jwtShape.Match(raw) {
+		return nil
+	}
+	return raw
+}
+
+// jwtCheck: the first part of a JWT is a JSON object with "alg", and the
+// signature is not a word: a signature shorter than 43 characters (32 bytes,
+// HS256) of letters only. A cut real one (a line break in it) still counts.
+func jwtCheck(secret []byte) bool {
+	if sig := secret[bytes.LastIndexByte(secret, '.')+1:]; len(sig) > 0 && len(sig) < 43 && !bytes.ContainsFunc(sig, func(r rune) bool {
+		return r < 'A' || r > 'Z' && r < 'a' || r > 'z'
+	}) {
+		return false
+	}
 	head, _, _ := strings.Cut(string(secret), ".")
 	raw, err := base64.RawURLEncoding.DecodeString(head)
 	if err != nil {

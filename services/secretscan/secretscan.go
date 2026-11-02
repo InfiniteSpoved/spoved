@@ -30,6 +30,7 @@ import (
 	"forgejo.org/modules/repository"
 	"forgejo.org/modules/timeutil"
 	notify_service "forgejo.org/services/notify"
+	repo_service "forgejo.org/services/repository"
 )
 
 // cronBatch is the most repositories one run of the cron task queues
@@ -55,7 +56,13 @@ func Init() error {
 		return errors.New("unable to create secret_scanning queue")
 	}
 	go graceful.GetManager().RunWithCancel(scanQueue)
-	requeue() // the repositories a switch marked before a stop or a crash: the queue is ready, whether or not the cron task is on
+	textQueue = queue.CreateUniqueQueue(graceful.GetManager().ShutdownContext(), "secret_scanning_text", textHandler)
+	if textQueue == nil {
+		return errors.New("unable to create secret_scanning_text queue")
+	}
+	go graceful.GetManager().RunWithCancel(textQueue)
+	repo_service.TextUnitsTurnedOn = EnqueueIfEnabled // its text scan was reset in the change of units
+	requeue()                                         // the repositories a switch marked before a stop or a crash: the queue is ready, whether or not the cron task is on
 	return nil
 }
 
@@ -91,7 +98,7 @@ func (*notifier) ForkRepository(ctx context.Context, _ *user_model.User, parent,
 	if p, err := secretscan_model.GetScan(ctx, parent.ID, secretscan_model.KindRepo); err != nil {
 		log.Error("secret scanning: read the scan state of repository %d: %v", parent.ID, err)
 	} else if p != nil && p.Status == secretscan_model.StatusOK {
-		s := &secretscan_model.Scan{RepoID: fork.ID, Kind: secretscan_model.KindRepo, ScannedTips: p.ScannedTips, Status: secretscan_model.StatusOK}
+		s := &secretscan_model.Scan{RepoID: fork.ID, Kind: secretscan_model.KindRepo, ScannedTips: p.ScannedTips, Status: secretscan_model.StatusOK, SkippedLarge: p.SkippedLarge}
 		if err := secretscan_model.Save(ctx, nil, s); err != nil && !errors.Is(err, secretscan_model.ErrScanMoved) {
 			log.Error("secret scanning: store the inherited scan state of repository %d: %v", fork.ID, err)
 		}
@@ -102,6 +109,14 @@ func (*notifier) ForkRepository(ctx context.Context, _ *user_model.User, parent,
 // NewPullRequest and PullRequestSynchronized: the head of a pull request from a fork, and of an AGit push, is a ref
 // of the base repository that no push event names.
 func (*notifier) NewPullRequest(ctx context.Context, pr *issues_model.PullRequest, _ []*user_model.User) {
+	if pr.Issue == nil {
+		_ = pr.LoadIssue(ctx)
+	}
+	var poster int64
+	if pr.Issue != nil {
+		poster = pr.Issue.PosterID
+	}
+	enqueueIssueText(ctx, pr.IssueID, poster) // its title and body
 	enqueuePullRequest(ctx, pr)
 }
 

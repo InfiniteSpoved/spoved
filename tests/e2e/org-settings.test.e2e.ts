@@ -70,7 +70,8 @@ test('org settings repositories list sorting', async ({page}) => {
   const response = await page.goto('/org/org3/settings/repos');
   expect(response?.status()).toBe(200);
 
-  const names = page.locator('table tbody tr td:first-child a');
+  // other specs seed more repositories in org3 (secret-lists-*), so only the fixture repositories are compared
+  const names = page.locator('table tbody tr td:first-child a', {hasText: /^repo\d+$/});
   await expect(names).toHaveCount(3);
 
   // Clicking the name header sorts ascending, a second click reverses the order.

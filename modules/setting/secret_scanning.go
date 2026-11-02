@@ -22,6 +22,7 @@ import (
 type SecretScanningOptions struct {
 	Enabled      bool
 	GenericRules bool // also run the rules that are noisy by default (secretdetection.Rule.DefaultOff)
+	ScanText     bool // also scan the text of issues, pull requests and comments (on by default)
 
 	MaxConcurrentScans   int64         // scans running at once in this process
 	ScanTimeout          time.Duration // the time of one slice of a scan
@@ -30,6 +31,7 @@ type SecretScanningOptions struct {
 	MaxScanBlobs         int64         // files read by one slice of a scan
 	MaxAlertsPerRepo     int64
 	MaxLocationsPerAlert int64
+	MaxTextBytes         int64 // bytes of one issue, pull request or comment text that are scanned; the rest is cut
 }
 
 // SecretScanning is the [secret_scanning] section of app.ini, the defaults of SecretScanningSettings.
@@ -55,6 +57,7 @@ var SecretScanningLimits = []SecretScanningLimit{
 	{"max_scan_blobs", "MAX_SCAN_BLOBS", 2_000_000, 1000, 100_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxScanBlobs }},
 	{"max_alerts_per_repo", "MAX_ALERTS_PER_REPO", 10_000, 100, 1_000_000, false, func(o *SecretScanningOptions) any { return &o.MaxAlertsPerRepo }},
 	{"max_locations_per_alert", "MAX_LOCATIONS_PER_ALERT", 100, 1, 10_000, false, func(o *SecretScanningOptions) any { return &o.MaxLocationsPerAlert }},
+	{"max_text_bytes", "MAX_TEXT_BYTES", 1 << 20, 1 << 10, 16 << 20, false, func(o *SecretScanningOptions) any { return &o.MaxTextBytes }},
 }
 
 // SecretScanningLimitByName finds a limit by its name.
@@ -102,8 +105,9 @@ var secretScanningDigits = regexp.MustCompile(`^[0-9]+$`)
 // SCAN_TIMEOUT is a duration (5m) or a bare number of seconds, and a number outside its bounds is clamped with a warning.
 func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 	sec := rootCfg.Section("secret_scanning")
-	SecretScanning.Enabled = secretScanningBool(sec, "ENABLED")
-	SecretScanning.GenericRules = secretScanningBool(sec, "GENERIC_RULES")
+	SecretScanning.Enabled = secretScanningBool(sec, "ENABLED", false)
+	SecretScanning.GenericRules = secretScanningBool(sec, "GENERIC_RULES", false)
+	SecretScanning.ScanText = secretScanningBool(sec, "SCAN_TEXT", true)
 	for _, l := range SecretScanningLimits {
 		v := l.Default
 		if raw := strings.TrimSpace(sec.Key(l.Key).String()); raw != "" {
@@ -124,15 +128,16 @@ func loadSecretScanningFrom(rootCfg ConfigProvider) error {
 	return nil
 }
 
-// secretScanningBool reads a boolean key: a word that is none (the ones MapTo reads) is logged and the default (false) is used.
-func secretScanningBool(sec ConfigSection, key string) bool {
+// secretScanningBool reads a boolean key: a word that is none (the ones MapTo reads) is logged and the default is used.
+func secretScanningBool(sec ConfigSection, key string, def bool) bool {
 	raw := strings.TrimSpace(sec.Key(key).String())
 	if raw == "" {
-		return false
+		return def
 	}
 	v, err := sec.Key(key).Bool()
 	if err != nil {
-		log.Warn("[secret_scanning] %s %q is not a boolean, using the default false", key, raw)
+		log.Warn("[secret_scanning] %s %q is not a boolean, using the default %t", key, raw, def)
+		return def
 	}
 	return v
 }
@@ -183,6 +188,7 @@ type SecretScanningConfig struct {
 	Invalid bool `json:"-"`
 
 	GenericRules *bool            `json:"generic_rules,omitempty"`
+	ScanText     *bool            `json:"scan_text,omitempty"`
 	Limits       map[string]int64 `json:"limits,omitempty"` // by SecretScanningLimit.Name; seconds for a duration
 	UpdatedBy    int64            `json:"updated_by,omitempty"`
 	UpdatedUnix  int64            `json:"updated_unix,omitempty"`
@@ -223,6 +229,9 @@ func (c SecretScanningConfig) Merge() SecretScanningOptions {
 	}
 	if c.GenericRules != nil {
 		o.GenericRules = *c.GenericRules
+	}
+	if c.ScanText != nil {
+		o.ScanText = *c.ScanText
 	}
 	for name, v := range c.Limits {
 		l, ok := SecretScanningLimitByName(name)

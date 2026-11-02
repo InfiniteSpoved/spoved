@@ -91,6 +91,7 @@ func createSessions(t testing.TB) {
 	users := []string{
 		"user1",
 		"user2",
+		"user4",
 		"user11",
 		"user12",
 		"user18",

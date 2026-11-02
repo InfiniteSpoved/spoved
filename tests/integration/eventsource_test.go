@@ -4,8 +4,11 @@
 package integration
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/eventsource"
+	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/tests"
 
@@ -85,4 +89,42 @@ func TestEventSourceManagerRun(t *testing.T) {
 	assert.Len(t, apiNL, 1)
 
 	assert.Eventually(t, expectNotificationCountEvent(1), 30*time.Second, 1*time.Second)
+}
+
+// The event stream must flush each event, with and without the Accept header (the session package passes the
+// writer through only with it).
+func TestEventSourceFlushes(t *testing.T) {
+	onApplicationRun(t, func(t *testing.T, u *url.URL) {
+		cookie := loginUser(t, "user2").GetCookie(setting.SessionConfig.CookieName)
+		require.NotNil(t, cookie)
+		for _, accept := range []string{"text/event-stream", ""} {
+			t.Run("accept "+accept, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				req, err := http.NewRequestWithContext(ctx, "GET", u.String()+"user/events", nil)
+				require.NoError(t, err)
+				req.AddCookie(cookie)
+				if accept != "" {
+					req.Header.Set("Accept", accept)
+				}
+				resp, err := http.DefaultClient.Do(req)
+				require.NoError(t, err)
+				defer resp.Body.Close()
+				require.Equal(t, http.StatusOK, resp.StatusCode)
+				go func() { // dropped until the handler has registered, so send until the test is done
+					for ctx.Err() == nil {
+						eventsource.GetManager().SendMessage(2, &eventsource.Event{Name: "flush-test", Data: "x"})
+						time.Sleep(100 * time.Millisecond)
+					}
+				}()
+				scanner := bufio.NewScanner(resp.Body)
+				for scanner.Scan() {
+					if scanner.Text() == "event: flush-test" {
+						return
+					}
+				}
+				t.Fatalf("no event before the timeout: %v", scanner.Err())
+			})
+		}
+	})
 }

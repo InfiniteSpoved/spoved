@@ -36,6 +36,26 @@ func MarkPush(ctx context.Context, repo *repo_model.Repository, pusherID int64, 
 	}
 }
 
+// markText marks the repository for a digest of the alerts above boundary after a live scan of one text stored a new alert, and mails it when it is
+// due: a text has no push, so nothing waits for a scan, except a code or wiki push marked earlier (that digest waits
+// for its own scan, as ever). Backfills and rescans never get here.
+func markText(ctx context.Context, repo *repo_model.Repository, boundary int64) {
+	if !Enabled(ctx, repo) {
+		return
+	}
+	if marked, err := secretscan_model.MarkNotifyText(ctx, repo.ID, boundary); err != nil {
+		log.Error("secret scanning: mark repository %d for a digest of text: %v", repo.ID, err)
+		return
+	} else if !marked {
+		return
+	}
+	states := map[string]kindState{}
+	for _, kind := range []string{secretscan_model.KindRepo, secretscan_model.KindWiki} {
+		states[kind] = readKindState(ctx, repo.ID, kind)
+	}
+	finishDigest(ctx, repo, readMark(ctx, repo.ID), states)
+}
+
 // notifyMark is the digest mark as the scan read it before it started.
 type notifyMark struct {
 	seq, alertID, pusherID int64
@@ -110,7 +130,7 @@ func finishDigest(ctx context.Context, repo *repo_model.Repository, m *notifyMar
 			return
 		}
 	}
-	if kinds&(secretscan_model.DigestKindCode|secretscan_model.DigestKindWiki) == 0 {
+	if kinds&(secretscan_model.DigestKindCode|secretscan_model.DigestKindWiki|secretscan_model.DigestKindText) == 0 {
 		kinds |= secretscan_model.DigestKindCode
 	}
 	if kinds&secretscan_model.DigestKindCode != 0 && !states[secretscan_model.KindRepo].current {

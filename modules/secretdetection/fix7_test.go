@@ -70,15 +70,30 @@ func TestKeywordLineAndAWSDecoysKeepLaterRules(t *testing.T) {
 }
 
 // Prose after a line with the keywords of the rules that have no literal
-// prefix is cheap, and a token after it is found with complete=true.
+// prefix is cheap, and a token after it is found with complete=true. The time
+// is compared with a scan of the prose alone (the best of three runs each), so
+// a slow or busy machine slows both: a search per keyword and rule made it
+// about 25 times the prose alone, sharing the gate's hits about twice.
 func TestKeywordLineThenProseFindsTheToken(t *testing.T) {
 	d := allRulesDetector(t)
 	prose := repeatTo("The quick brown fox jumps over the lazy dog, and then it rests. ", 9<<20/slowdown)
 	content := append([]byte(keywordLine), prose...)
 	content = append(content, []byte("\nghp_"+fake(36, alnum)+"\n")...)
-	start := time.Now()
+	best := func(b []byte) time.Duration {
+		var least time.Duration
+		for i := range 3 {
+			start := time.Now()
+			d.Scan(b)
+			if took := time.Since(start); i == 0 || took < least {
+				least = took
+			}
+		}
+		return least
+	}
+	baseline, took := best(prose), best(content)
+	t.Logf("prose alone %v, after the keyword line %v", baseline, took)
+	assert.Less(t, took, 3*baseline+200*time.Millisecond*slowdown)
 	fs, complete := d.Scan(content)
-	assert.Less(t, time.Since(start), time.Second*slowdown)
 	assert.True(t, complete)
 	assert.Equal(t, 1, countRuleIn(fs, "github-token"))
 }
@@ -94,4 +109,31 @@ func TestCustomRulesDoNotStarveALaterCustomRule(t *testing.T) {
 	fs, _ := d.Scan([]byte(content))
 	assert.Equal(t, 1, countRuleIn(fs, "cacme"))
 	assert.Equal(t, 1, countRuleIn(fs, "github-token"))
+}
+
+// Rules that share a keyword share its hits: each still finds its own tokens,
+// also when the scan stops keeping hits early.
+func TestSharedKeywordFindsEveryRulesTokens(t *testing.T) {
+	defer func(v int) { keptHitsBase = v }(keptHitsBase)
+	rules := []Rule{
+		{ID: "acme-anchored", Name: "n", Type: "acme", Keywords: []string{"acme_"}, Regex: `(acme_[a-z0-9]{24})`, SecretGroup: 1, Window: 32, Anchored: true},
+		{ID: "acme-window", Name: "n", Type: "acme", Keywords: []string{"acme"}, Regex: `acme_key\s*=\s*"([A-Z0-9]{20})"`, SecretGroup: 1, Window: 64},
+		{ID: "acme-window2", Name: "n", Type: "acme", Keywords: []string{"acme_", "other"}, Regex: `acme_id:([0-9]{12})\b`, SecretGroup: 1, Window: 64},
+	}
+	d, err := NewDetector(rules)
+	require.NoError(t, err)
+	var b strings.Builder
+	for range 3 {
+		b.WriteString("acme_" + fake(24, "abcdefghijklmnopqrstuvwxyz0123456789") + "\n")
+		b.WriteString(`acme_key = "` + fake(20, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") + "\"\n")
+		b.WriteString("acme_id:" + fake(12, "0123456789") + "\n" + strings.Repeat("acme ", 50) + "\n")
+	}
+	for _, base := range []int{1024, 0} {
+		keptHitsBase = base
+		fs, complete := d.Scan([]byte(b.String()))
+		assert.True(t, complete)
+		for _, r := range rules {
+			assert.Equal(t, 3, countRuleIn(fs, r.ID), "%s, keptHitsBase %d", r.ID, base)
+		}
+	}
 }

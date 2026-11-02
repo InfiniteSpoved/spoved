@@ -4,7 +4,6 @@
 package convert
 
 import (
-	"cmp"
 	"context"
 	"strconv"
 	"time"
@@ -12,8 +11,8 @@ import (
 	repo_model "forgejo.org/models/repo"
 	secretscan_model "forgejo.org/models/secretscan"
 	user_model "forgejo.org/models/user"
-	"forgejo.org/modules/secretdetection"
 	api "forgejo.org/modules/structs"
+	"forgejo.org/modules/translation"
 	"forgejo.org/modules/util"
 )
 
@@ -36,15 +35,20 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 	if err != nil {
 		return nil, err
 	}
-	names := map[string]string{}
-	for _, r := range secretdetection.BuiltinRules() {
-		names[r.ID] = r.Name
+	ruleIDs := make([]string, len(alerts))
+	for i, a := range alerts {
+		ruleIDs[i] = a.RuleID
 	}
+	labels, err := secretscan_model.LoadRuleLabels(ctx, ruleIDs) // one query; a deleted pattern's name stays out
+	if err != nil {
+		return nil, err
+	}
+	locale := translation.NewLocale("en-US") // the API's names are English
 	out := make([]*api.SecretScanningAlert, 0, len(alerts))
 	for _, a := range alerts {
 		index := strconv.FormatInt(a.Index, 10)
 		res := &api.SecretScanningAlert{
-			Number: a.Index, State: secretscan_model.StateOpen, SecretType: a.RuleID, SecretTypeDisplayName: cmp.Or(names[a.RuleID], a.RuleID),
+			Number: a.Index, State: secretscan_model.StateOpen, SecretType: a.RuleID, SecretTypeDisplayName: labels.Label(a.RuleID, repo.OwnerID, nil).Text(locale),
 			Fingerprint: a.Fingerprint, ViaPull: a.ViaPull, LocationsCount: counts[a.ID],
 			URL:       repo.APIURL() + "/secret-scanning/alerts/" + index,
 			CreatedAt: time.Unix(int64(a.CreatedUnix), 0).UTC(), UpdatedAt: time.Unix(int64(a.UpdatedUnix), 0).UTC(),
@@ -67,10 +71,15 @@ func ToSecretScanningAlerts(ctx context.Context, doer *user_model.User, repo *re
 }
 
 // ToSecretScanningLocations converts places of an alert of the repository, in GitHub's shape; wikiURL turns the
-// path of a wiki place into its page URL.
-func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_model.Location, wikiURL func(path string) string) []*api.SecretScanningLocation {
+// path of a wiki place into its page URL. texts has the places in text as the caller may see them
+// (LoadTextPlaces): one the caller may not read is only named issue_text or comment_text, without any detail.
+func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_model.Location, texts map[int64]*secretscan_model.TextPlace, wikiURL func(path string) string) []*api.SecretScanningLocation {
 	out := make([]*api.SecretScanningLocation, 0, len(locs))
 	for _, l := range locs {
+		if l.IsText() {
+			out = append(out, toTextLocation(repo, l, texts[l.ID]))
+			continue
+		}
 		res := &api.SecretScanningLocation{Type: "commit", Details: api.SecretScanningLocationDetails{
 			Path: l.Path, StartLine: l.StartLine, EndLine: l.EndLine, BlobSHA: l.BlobID, CommitSHA: l.CommitID,
 			CommitAuthorName: l.AuthorName, CommitAuthorEmail: l.AuthorEmail, PullRef: l.Kind == secretscan_model.KindPull,
@@ -93,6 +102,48 @@ func ToSecretScanningLocations(repo *repo_model.Repository, locs []*secretscan_m
 		out = append(out, res)
 	}
 	return out
+}
+
+func toTextLocation(repo *repo_model.Repository, l *secretscan_model.Location, p *secretscan_model.TextPlace) *api.SecretScanningLocation {
+	if p == nil || !p.Readable {
+		hidden := &api.SecretScanningLocation{Type: l.Kind + "_text"} // issue_text, comment_text
+		if p != nil && p.Deleted {
+			hidden.Details.Removed = true // the caller reads both units: the issue is gone
+		}
+		return hidden
+	}
+	what := util.Iif(p.IsPull, "pull_request", "issue")
+	field := util.Iif(l.Kind == secretscan_model.KindComment, "comment", l.Field)
+	num := strconv.FormatInt(p.Number, 10)
+	d := api.SecretScanningLocationDetails{
+		StartLine: l.StartLine, EndLine: l.EndLine, IssueNumber: p.Number, Field: field, Removed: p.Removed(),
+		HTMLURL: repo.HTMLURL() + util.Iif(p.IsPull, "/pulls/", "/issues/") + num,
+	}
+	url := repo.APIURL() + util.Iif(p.IsPull, "/pulls/", "/issues/") + num
+	if l.Kind == secretscan_model.KindComment {
+		id := strconv.FormatInt(l.SourceID, 10)
+		url, d.HTMLURL = repo.APIURL()+"/issues/comments/"+id, d.HTMLURL+"#issuecomment-"+id
+		d.CommentID = l.SourceID
+	}
+	typ := what + "_" + field
+	switch typ { // GitHub's names: one URL key per type
+	case "issue_title":
+		d.IssueTitleURL = url
+	case "issue_body":
+		d.IssueBodyURL = url
+	case "issue_comment":
+		d.IssueCommentURL = url
+	case "pull_request_title":
+		d.PullRequestTitleURL = url
+	case "pull_request_body":
+		d.PullRequestBodyURL = url
+	case "pull_request_comment":
+		d.PullRequestCommentURL = url
+	}
+	if p.Poster != nil {
+		d.Poster = p.Poster.Name
+	}
+	return &api.SecretScanningLocation{Type: typ, Details: d}
 }
 
 // ToSecretScanningStatus sums up the state rows of a repository's code, wiki and pull refs: failed beats incomplete

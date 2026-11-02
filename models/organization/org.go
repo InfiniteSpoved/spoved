@@ -18,6 +18,7 @@ import (
 	"forgejo.org/models/perm"
 	repo_model "forgejo.org/models/repo"
 	secret_model "forgejo.org/models/secret"
+	secretscan_model "forgejo.org/models/secretscan"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
@@ -507,6 +508,11 @@ func DeleteOrganization(ctx context.Context, org *Organization) error {
 		&user_model.Follow{FollowID: org.ID},
 	); err != nil {
 		return fmt.Errorf("DeleteBeans: %w", err)
+	}
+
+	// the patterns stay as tombstones: repositories transferred out earlier label their alerts with them
+	if err := secretscan_model.TombstoneOwnerPatterns(ctx, org.ID); err != nil {
+		return fmt.Errorf("TombstoneOwnerPatterns: %w", err)
 	}
 
 	if err := auth_model.DeleteOwnedAccessTokens(ctx, auth_model.AccessTokenOwnerOrg, org.ID, 0); err != nil {

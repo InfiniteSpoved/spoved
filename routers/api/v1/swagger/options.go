@@ -127,6 +127,8 @@ type swaggerParameterBodies struct {
 
 	// in:body
 	EditSecretScanningAlertOption api.EditSecretScanningAlertOption
+	// in:body
+	RedactSecretScanningTextOption api.RedactSecretScanningTextOption
 
 	// in:body
 	CreateRepoOption api.CreateRepoOption

@@ -131,6 +131,14 @@ func TestCSVSafe(t *testing.T) {
 		" \n@a":     "' \n@a",
 		" a =":      " a =",
 		"'=already": "'=already",
+		"\u00a0=1":  "'\u00a0=1", // NBSP and other Unicode spaces count as space
+		"\u3000+1":  "'\u3000+1",
+		"\uff1d1+2": "'\uff1d1+2", // full-width = + - @
+		"\uff0bcmd": "'\uff0bcmd",
+		"\uff0d1":   "'\uff0d1",
+		"\uff20a":   "'\uff20a",
+		" \uff1da":  "' \uff1da",
+		"\u00a0a":   "\u00a0a",
 	} {
 		assert.Equal(t, out, CSVSafe(in), in)
 	}

@@ -13,9 +13,14 @@ import (
 	"forgejo.org/services/auth"
 	"forgejo.org/services/context"
 	dependency_service "forgejo.org/services/dependency"
+	secretscan_service "forgejo.org/services/secretscan"
 )
 
 const tplSecuritySearch base.TplName = "admin/security_search"
+
+const tplSecretAlerts base.TplName = "admin/secret_alerts"
+
+const secretAlertsLink = "/admin/security/secrets"
 
 const securitySearchLink = "/admin/config/dependency-graph/"
 
@@ -75,4 +80,33 @@ func SecurityVulnerabilitiesExport(ctx *context.Context) {
 // SecurityDependenciesExport downloads the dependency search as CSV or JSON.
 func SecurityDependenciesExport(ctx *context.Context) {
 	shared_security.Export(ctx, securitySearchScope(ctx), shared_security.Dependencies, setting.AppSubURL+securitySearchLink+shared_security.Dependencies)
+}
+
+// MustEnableSecretAlerts answers 404 to the download of the secret alert list (after the access gate) while secret
+// scanning is off for the instance: its alerts are hidden then, and a download of nothing is never recorded.
+func MustEnableSecretAlerts(ctx *context.Context) {
+	if !secretscan_service.SiteEnabled(ctx) {
+		ctx.NotFound("MustEnableSecretAlerts", nil)
+	}
+}
+
+func secretAlertsScope(ctx *context.Context) secretscan_service.Scope {
+	return secretscan_service.Scope{Doer: ctx.Doer, Admin: true}
+}
+
+// SecretAlerts lists the secret alerts of every repository on the instance, or says that secret scanning is off.
+func SecretAlerts(ctx *context.Context) {
+	if !secretscan_service.SiteEnabled(ctx) {
+		ctx.Data["SecretsSiteOff"] = true
+	} else if !shared_security.Secrets(ctx, secretAlertsScope(ctx), setting.AppSubURL+secretAlertsLink) {
+		return
+	}
+	ctx.Data["Title"] = ctx.Tr("secret_search.title")
+	ctx.Data["PageIsAdminSecretAlerts"] = true
+	ctx.HTML(http.StatusOK, tplSecretAlerts)
+}
+
+// SecretAlertsExport downloads the secret alert list as CSV.
+func SecretAlertsExport(ctx *context.Context) {
+	shared_security.SecretsExport(ctx, secretAlertsScope(ctx), setting.AppSubURL+secretAlertsLink)
 }

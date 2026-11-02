@@ -121,7 +121,9 @@ var Fields = map[string][]string{
 	"api_request":       {"method", "route", "status", "target", "bytes"},
 	"upload":            {"kind", "op", "bytes", "object"},
 	"dependency_search": {"kind", "ecosystem", "name", "advisory", "owner", "state", "total"},
+	"secret_pattern":    {"name", "pattern_sha256", "keyword_count", "previous_name", "previous_pattern_sha256"},
 	"dependency_export": {"kind", "format", "ecosystem", "name", "version", "range", "direct", "advisory", "owner", "project", "state", "severity", "count"},
+	"secret_export":     {"kind", "format", "state", "reason", "type", "owner", "project", "q", "count"},
 	"download":          {"kind", "bytes", "object"},
 	"git_read":          {"service", "protocol", "bytes", "wiki"},
 	"git_push":          {"refs", "more", "forced_count", "forced_unknown", "deleted_count", "wiki", "trigger"},
@@ -213,7 +215,7 @@ var Fields = map[string][]string{
 	"vulnerability_alert": {
 		"alert_id", "advisory_id", "ecosystem", "package", "manifest", "reason", "comment", "previous_state", "previous_reason",
 	},
-	"secret_scanning_alert": {"index", "rule", "fingerprint", "path", "previous_state", "state", "comment"},
+	"secret_scanning_alert": {"index", "rule", "fingerprint", "path", "previous_state", "state", "comment", "issue", "field", "comment_id", "replaced", "history_only", "cleaned"},
 	"vulnerability_mirror":  {"ecosystems"},
 	// dependency_graph: the settings saved in Site administration; the mirror token only as token_changed
 	"dependency_graph": {

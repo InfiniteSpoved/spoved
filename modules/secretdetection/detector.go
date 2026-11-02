@@ -5,7 +5,9 @@ package secretdetection
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"unicode/utf16"
@@ -28,6 +30,11 @@ const (
 	// larger of MinMaxWork and WorkPerByte times the content length.
 	MinMaxWork  = 16 << 20
 	WorkPerByte = 3
+	// MinCustomWork is the floor of the custom rules' own budget, which is
+	// otherwise sized like the built-in rules' (see Detector.MaxWork): a small
+	// file costs custom rules at most an eighth of what it may cost built-in
+	// ones.
+	MinCustomWork = 2 << 20
 	// workChunk is the most bytes one regex call gets in a window rule, and
 	// hitCheckCost the work units charged for one HitCheck.
 	workChunk    = 64 << 10
@@ -54,6 +61,9 @@ type Finding struct {
 	StartLine int // 1-based, line of the first byte of the secret; lines end at LF, as in git
 	EndLine   int // 1-based, line of its last byte (PEM blocks span lines)
 	StartCol  int // 1-based byte column in StartLine
+	// Start and End are the byte offsets of the secret in the content as it was
+	// scanned (for UTF-16 content, in its UTF-8 decoding).
+	Start, End int
 	// Fingerprint is Fingerprint(secret) (of the normalized secret, see
 	// Rule.Normalize).
 	Fingerprint string
@@ -73,10 +83,13 @@ type Detector struct {
 	// by a built-in rule, 8 for a window or a keyword hit, more for a custom
 	// rule with a big program), in eighths of a byte: past MaxWork*8 the Scan
 	// stops and returns complete=false. 0 or less means the larger of
-	// MinMaxWork and WorkPerByte times the content length.
+	// MinMaxWork and WorkPerByte times the content length. The custom rules
+	// have a budget of their own on top: MaxWork too when it is set, else the
+	// larger of MinCustomWork and WorkPerByte times the content length.
 	MaxWork int
 
 	rules []*compiledRule
+	gate  keywordGate
 }
 
 // NewDetector compiles rules. Which rules to pass is the caller's decision.
@@ -101,9 +114,15 @@ func NewDetector(rules []Rule) (*Detector, error) {
 		if err != nil {
 			return nil, err
 		}
+		c.keywordIDs = d.gate.add(r.Keywords)
 		d.rules = append(d.rules, c)
 	}
 	return d, nil
+}
+
+// HasRule tells whether the detector runs the rule with that ID.
+func (d *Detector) HasRule(id string) bool {
+	return slices.ContainsFunc(d.rules, func(r *compiledRule) bool { return r.ID == id })
 }
 
 type rawFinding struct {
@@ -176,13 +195,20 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 		budget = max(MinMaxWork, WorkPerByte*len(content))
 	}
 	budget *= 8
+	customBudget := d.MaxWork
+	if customBudget <= 0 {
+		customBudget = max(MinCustomWork, WorkPerByte*len(content))
+	}
+	customBudget *= 8
 	work := 0
 
 	var macKey []byte
 	var found []rawFinding
 	var active []*compiledRule
+	hits := d.gate.find(lower)
+	firstHit := hits.first
 	for _, r := range d.rules {
-		if hasKeyword(lower, r.Keywords) {
+		if len(r.keywordIDs) == 0 || slices.ContainsFunc(r.keywordIDs, func(i int) bool { return firstHit[i] >= 0 }) {
 			active = append(active, r)
 		}
 	}
@@ -252,15 +278,21 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 			// pass over everything between hits.
 			for ; st.ki < len(r.Keywords); st.ki, st.off, st.next = st.ki+1, 0, 0 {
 				k := r.Keywords[st.ki]
+				// The search starts at the keyword's first hit, and a keyword
+				// the gate didn't see costs nothing.
+				first := firstHit[r.keywordIDs[st.ki]]
+				if first < 0 {
+					continue
+				}
+				st.off = max(st.off, first)
 				for {
 					if work > limit {
 						return false
 					}
-					i := bytes.Index(lower[st.off:], []byte(k))
-					if i < 0 {
+					p := hits.next(r.keywordIDs[st.ki], st.off)
+					if p < 0 {
 						break
 					}
-					p := st.off + i
 					st.off = p + 1
 					start := p - r.KeywordOffset
 					if p < st.next || start < 0 {
@@ -291,7 +323,7 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 			return true
 		}
 		if !st.haveRanges {
-			ranges, spent, ok := r.ranges(lower, limit-work)
+			ranges, spent, ok := r.ranges(len(lower), firstHit, hits, limit-work)
 			work += spent
 			if !ok {
 				return false
@@ -347,27 +379,41 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 	// needs less passes the rest on), so decoys for early rules can't starve
 	// later ones; then the work that is left goes to the rules that stopped,
 	// each continuing where it stopped.
-	for i, st := range runs {
-		if work >= budget {
-			break
-		}
-		st.done = run(st, work+(budget-work)/(len(runs)-i))
-	}
-	for i, st := range runs {
-		if st.done {
-			continue
-		}
-		if work >= budget {
-			break
-		}
-		stopped := 0
-		for _, s := range runs[i:] {
-			if !s.done {
-				stopped++
+	share := func(runs []*ruleRun, budget int) {
+		work = 0
+		for i, st := range runs {
+			if work >= budget {
+				break
 			}
+			st.done = run(st, work+(budget-work)/(len(runs)-i))
 		}
-		st.done = run(st, work+(budget-work)/stopped)
+		for i, st := range runs {
+			if st.done {
+				continue
+			}
+			if work >= budget {
+				break
+			}
+			stopped := 0
+			for _, s := range runs[i:] {
+				if !s.done {
+					stopped++
+				}
+			}
+			st.done = run(st, work+(budget-work)/stopped)
+		}
 	}
+	// The built-in rules have the whole budget; the custom ones (last, see
+	// NewDetector) their own, so they can never take work from a built-in rule.
+	builtin := len(runs)
+	for i, st := range runs {
+		if st.r.custom {
+			builtin = i
+			break
+		}
+	}
+	share(runs[:builtin], budget)
+	share(runs[builtin:], customBudget)
 	for _, st := range runs {
 		if !st.done {
 			complete = false
@@ -386,10 +432,12 @@ func (d *Detector) scanText(content []byte, maxFindings int) (findings []Finding
 		}
 		pos = f.start
 		findings[i] = Finding{
-			RuleID:      f.rule.ID,
+			RuleID:      cmp.Or(f.rule.ReportAs, f.rule.ID),
 			StartLine:   line,
 			EndLine:     line + bytes.Count(content[f.start:f.end-1], []byte("\n")),
 			StartCol:    f.start - lineStart + 1,
+			Start:       f.start,
+			End:         f.end,
 			Fingerprint: f.fingerprint,
 		}
 	}
@@ -533,27 +581,30 @@ func isLFSPointer(content []byte) bool {
 
 // ranges returns the byte ranges the rule's regex runs on: all of the content,
 // or for a rule with a Window the windows around keyword hits, merged.
+// firstHit is where each keyword of the gate first occurs (-1: nowhere).
 // Finding the windows costs hitCost work units per keyword hit; ok is false
 // when that is more than allow.
-func (r *compiledRule) ranges(lower []byte, allow int) (out [][2]int, spent int, ok bool) {
+func (r *compiledRule) ranges(n int, firstHit []int, hits *keywordHits, allow int) (out [][2]int, spent int, ok bool) {
 	if r.Window <= 0 {
-		return [][2]int{{0, len(lower)}}, 0, true
+		return [][2]int{{0, n}}, 0, true
 	}
-	for _, k := range r.Keywords {
+	for ki, k := range r.Keywords {
+		if firstHit[r.keywordIDs[ki]] < 0 {
+			continue
+		}
 		// Windows of one keyword, merged as they come.
 		var cur [2]int
 		have := false
-		for off := 0; ; {
-			i := bytes.Index(lower[off:], []byte(k))
-			if i < 0 {
+		for off := firstHit[r.keywordIDs[ki]]; ; {
+			p := hits.next(r.keywordIDs[ki], off)
+			if p < 0 {
 				break
 			}
-			p := off + i
 			off = p + 1
 			if spent += hitCost; spent > allow {
 				return nil, spent, false
 			}
-			lo, hi := max(0, p-r.Window), min(len(lower), p+len(k)+r.Window)
+			lo, hi := max(0, p-r.Window), min(n, p+len(k)+r.Window)
 			if have && lo <= cur[1] {
 				cur[1] = hi
 				continue
@@ -582,7 +633,7 @@ func (r *compiledRule) ranges(lower []byte, allow int) (out [][2]int, spent int,
 // accepts checks the secret itself, never the text around it: context such as
 // XML tags or a template next to a real key must not drop it.
 func (r *compiledRule) accepts(secret []byte) bool {
-	if r.MinEntropy > 0 && entropy(secret) < r.MinEntropy {
+	if r.MinEntropy > 0 && (entropy(secret) < r.MinEntropy || r.Type != "generic" && ascending(secret, 10)) {
 		return false
 	}
 	for _, a := range r.allowlist {
@@ -591,6 +642,23 @@ func (r *compiledRule) accepts(secret []byte) bool {
 		}
 	}
 	return r.Check == nil || r.Check(secret)
+}
+
+// ascending: b has a run of n bytes that each follow the one before
+// (0123456789, abcdefghij), a placeholder however high its entropy. People
+// choose such runs in passwords, so the generic rules don't use it.
+func ascending(b []byte, n int) bool {
+	for i, k := 1, 1; i < len(b); i++ {
+		if b[i] == b[i-1]+1 {
+			k++
+		} else {
+			k = 1
+		}
+		if k >= n {
+			return true
+		}
+	}
+	return false
 }
 
 // overlaps: a secret overlapping one already found is the same secret, the
@@ -614,6 +682,163 @@ func asciiLower(b []byte) []byte {
 		out[i] = c
 	}
 	return out
+}
+
+// keywordGate tells which keywords occur in a text in one pass over it, by
+// their first two bytes, instead of one search per keyword (with a hundred
+// rules that was most of the time of a scan). first holds the index+1 of the
+// bucket of a byte pair (an array, not a map: a map lookup per byte pair was
+// most of the time of the pass).
+type keywordGate struct {
+	words   []string
+	ids     map[string]int
+	first   [1 << 16]uint16
+	buckets [][]int
+	third   [][4]uint64 // by bucket, the third bytes of its keywords (all for a two-byte one)
+	single  []int       // one-byte keywords
+}
+
+// add registers keywords and returns their IDs.
+func (g *keywordGate) add(keywords []string) []int {
+	if g.ids == nil {
+		g.ids = map[string]int{}
+	}
+	out := make([]int, 0, len(keywords))
+	for _, k := range keywords {
+		id, ok := g.ids[k]
+		if !ok {
+			id = len(g.words)
+			g.words = append(g.words, k)
+			g.ids[k] = id
+			if len(k) == 1 {
+				g.single = append(g.single, id)
+			} else {
+				b := uint16(k[0])<<8 | uint16(k[1])
+				if g.first[b] == 0 {
+					if len(g.buckets) == math.MaxUint16 {
+						panic("secretdetection: more keyword byte pairs than the gate holds")
+					}
+					g.buckets = append(g.buckets, nil)
+					g.third = append(g.third, [4]uint64{})
+					g.first[b] = uint16(len(g.buckets))
+				}
+				g.buckets[g.first[b]-1] = append(g.buckets[g.first[b]-1], id)
+				if t := &g.third[g.first[b]-1]; len(k) == 2 {
+					*t = [4]uint64{^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)}
+				} else {
+					t[k[2]>>6] |= 1 << (k[2] & 63)
+				}
+			}
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// find finds where each keyword occurs in lower, in one pass: by keyword ID
+// the first occurrence (-1: nowhere) and, up to the hit limit, all of them.
+func (g *keywordGate) find(lower []byte) *keywordHits {
+	n := len(g.words)
+	h := &keywordHits{lower: lower, words: g.words, first: make([]int, n), at: make([][]int32, n), from: make([]int, n), limit: len(lower)/16 + keptHitsBase}
+	if len(lower) > math.MaxInt32 {
+		h.limit = 0 // offsets are kept as int32
+	}
+	first := h.first
+	for i := range first {
+		first[i] = -1
+	}
+	left := n
+	// open counts the keywords of each bucket not seen yet: once the hit
+	// limit is reached, a bucket whose keywords were all seen costs no more
+	// comparisons.
+	open := make([]int, len(g.buckets))
+	for i, b := range g.buckets {
+		open[i] = len(b)
+	}
+	for _, id := range g.single {
+		if first[id] = bytes.IndexByte(lower, g.words[id][0]); first[id] >= 0 {
+			left--
+		}
+	}
+	// done is where collecting all hits stopped: the lists are complete
+	// before it, and next searches on from there.
+	done := len(lower)
+	collect := true
+	for p := 0; p+1 < len(lower) && (left > 0 || collect); p++ {
+		bucket := g.first[uint16(lower[p])<<8|uint16(lower[p+1])]
+		if bucket == 0 || p+2 < len(lower) && g.third[bucket-1][lower[p+2]>>6]&(1<<(lower[p+2]&63)) == 0 || !collect && open[bucket-1] == 0 {
+			continue
+		}
+		for _, id := range g.buckets[bucket-1] {
+			// the third byte first: most keywords that share a pair differ there
+			if w := g.words[id]; (collect || first[id] < 0) && (len(w) < 3 || p+2 < len(lower) && lower[p+2] == w[2]) && bytes.HasPrefix(lower[p:], []byte(w)) {
+				if first[id] < 0 {
+					first[id] = p
+					open[bucket-1]--
+					left--
+				}
+				if collect {
+					h.at[id] = append(h.at[id], int32(p))
+					h.total++
+				}
+			}
+		}
+		if collect && h.total >= h.limit {
+			collect, done = false, p+1
+		}
+	}
+	for id := range h.from {
+		h.from[id] = done
+	}
+	for _, id := range g.single {
+		h.from[id] = first[id]
+		if first[id] < 0 {
+			h.from[id] = len(lower)
+		}
+	}
+	return h
+}
+
+// keptHitsBase plus a 16th of the content length is how many keyword hits a
+// scan keeps (a variable for tests).
+var keptHitsBase = 1024
+
+// keywordHits are the keyword occurrences of one scan, shared by its rules,
+// so a keyword that several rules use is searched once. at holds a keyword's
+// occurrences in order, every one before from. At most about limit are kept
+// in all, as int32: a quarter of the content's size live, and up to about
+// four times that allocated while the lists grow.
+type keywordHits struct {
+	lower        []byte
+	words        []string
+	first        []int
+	at           [][]int32
+	from         []int
+	total, limit int
+}
+
+// next returns the first occurrence of keyword id at or after off (-1: none).
+func (h *keywordHits) next(id, off int) int {
+	at := h.at[id]
+	if len(at) > 0 && off <= int(at[len(at)-1]) {
+		i, _ := slices.BinarySearch(at, int32(off))
+		return int(at[i])
+	}
+	from := min(max(off, h.from[id]), len(h.lower))
+	p := bytes.Index(h.lower[from:], []byte(h.words[id]))
+	if p >= 0 {
+		p += from
+	}
+	// Only a search that goes on from where the kept ones end is kept.
+	if from == h.from[id] && h.total < h.limit {
+		if p < 0 {
+			h.from[id] = len(h.lower)
+		} else {
+			h.at[id], h.from[id] = append(at, int32(p)), p+1
+			h.total++
+		}
+	}
+	return p
 }
 
 func hasKeyword(lower []byte, keywords []string) bool {
