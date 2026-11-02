@@ -43,12 +43,14 @@ const maintenanceMessage = "Upgrade in progress"
 func setMaintenance(t *testing.T, mode string, until time.Time) func() {
 	t.Helper()
 	require.NoError(t, maintenance_service.Set(db.DefaultContext, nil, mode, maintenanceMessage, until))
+	bumpSettingsRevision(t) // fixtures reset the revision, so a cached value of another test could win
 	return func() { maintenanceOff(t) }
 }
 
 func maintenanceOff(t *testing.T) {
 	t.Helper()
 	require.NoError(t, maintenance_service.Set(db.DefaultContext, nil, setting.MaintenanceOff, "", time.Time{}))
+	bumpSettingsRevision(t)
 }
 
 func assertMaintenanceFlash(t *testing.T, session *TestSession) {
