@@ -52,6 +52,8 @@ forgejo.org/models/repo
 
 forgejo.org/models/secretscan
 	DeleteScans
+	FindCustomPatterns
+	CountOpenAlerts
 
 forgejo.org/models/user
 	IsErrUserWrongType
@@ -178,14 +180,6 @@ forgejo.org/modules/queue/lqinternal
 forgejo.org/modules/ratelimit
 	ResetForTest
 
-forgejo.org/modules/secretdetection
-	ValidateCustomRule
-	CustomRule
-	keywordsInMatch
-	checkComplexity
-	maxMatchLen
-	unbounded
-
 forgejo.org/modules/setting
 	NewConfigProviderFromData
 	GitConfigType.GetOption
@@ -309,6 +303,11 @@ forgejo.org/services/repository/files
 
 forgejo.org/services/repository/gitgraph
 	Parser.Reset
+
+forgejo.org/services/secretscan
+	ValidatePattern
+	UpdatePattern
+	DeletePattern
 
 forgejo.org/services/stats
 	Flush
